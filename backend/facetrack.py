@@ -1,3 +1,5 @@
+import json
+import math
 import os
 import time
 
@@ -10,6 +12,7 @@ from mediapipe.tasks.python import vision
 
 
 MODEL_PATH = "model/face_landmarker.task"
+PITCH_NEUTRAL_THRESHOLD_DEG = 5.0
 
 # カメラを開く関数
 def open_camera(camera_index=0):
@@ -30,7 +33,7 @@ def read_frame(capture, retries=30, delay_seconds=0.05):
   return False, None
 
 # 結果から表示用のテキスト行を構築する関数
-def build_result_lines(result):
+def build_result_lines(result, angles=None):
   face_count = len(result.face_landmarks)
   lines = [f"Faces: {face_count}"]
 
@@ -49,12 +52,66 @@ def build_result_lines(result):
     top_blendshape = max(result.face_blendshapes[0], key=lambda item: item.score)
     lines.append(f"Blendshape: {top_blendshape.category_name} {top_blendshape.score:.2f}")
 
+  if angles:
+    data = json.loads(angles)
+    lines.append(f"Yaw:   {data['yaw']}°")
+    lines.append(f"Pitch: {data['pitch']}°")
+    lines.append(f"YawVector:  {data['yaw']}°")
+    lines.append(f"Pitch zone: {data['pitch_zone']}")
+
+  lines.append("Press 'q' to quit")
   return lines
+
+def get_angle(landResult):
+  # detection_result は FaceLandmarker の出力結果
+    if hasattr(landResult, 'facial_transformation_matrixes') and landResult.facial_transformation_matrixes:
+        for matrix_data in landResult.facial_transformation_matrixes:
+            # matrix_data は numpy の 4x4 行列
+            m = matrix_data
+
+            # 変換行列から回転成分(3x3)を抽出
+            r11, r12, r13 = m[0][0], m[0][1], m[0][2]
+            r21, r22, r23 = m[1][0], m[1][1], m[1][2]
+            r31, r32, r33 = m[2][0], m[2][1], m[2][2]
+
+            # オイラー角（角度）の計算 (ラジアン)
+            # 左右の首振り (Yaw)
+            yaw = math.asin(-r31)
+
+            # 上下の傾き (Pitch)
+            pitch = math.atan2(r32, r33)
+
+            # 左右の傾き (Roll)
+            roll = math.atan2(r21, r11)
+
+            # ラジアンを度数法(degree)に変換
+            yaw_deg = max(-90.0, min(90.0, math.degrees(yaw)))
+            pitch_deg = math.degrees(pitch) * -1
+            roll_deg = math.degrees(roll)
+
+            if pitch_deg <= -PITCH_NEUTRAL_THRESHOLD_DEG:
+              pitch_zone = -1
+            elif pitch_deg >= PITCH_NEUTRAL_THRESHOLD_DEG:
+              pitch_zone = 1
+            else:
+              pitch_zone = 0
+
+            # JSON で返す
+            result = {
+              "yaw": round(yaw_deg, 2),
+              "pitch": round(pitch_deg, 2),
+              "roll": round(roll_deg, 2),
+              "pitch_zone": pitch_zone,
+            }
+            return json.dumps(result)
+    return None
+  
 
 # 結果をフレームにオーバーレイ表示する関数
 def draw_result_overlay(frame_bgr, result):
   overlay = frame_bgr.copy()
-  lines = build_result_lines(result)
+  angles = get_angle(result)
+  lines = build_result_lines(result, angles)
 
   panel_height = 30 + len(lines) * 28
   cv.rectangle(overlay, (10, 10), (430, panel_height), (0, 0, 0), -1)
@@ -82,12 +139,12 @@ def main():
     base_options=base_options,
     running_mode=vision.RunningMode.VIDEO,
     num_faces=1,
+    output_facial_transformation_matrixes=True,
   )
 
   capture = open_camera(0)
   if capture is None:
     raise RuntimeError("Webカメラを開始できませんでした。")
-
   with vision.FaceLandmarker.create_from_options(options) as landmarker:
     while True:
       success, frame_bgr = read_frame(capture)
@@ -99,13 +156,13 @@ def main():
       mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
 
       timestamp_ms = int(time.time() * 1000)
-      result = landmarker.detect_for_video(mp_image, timestamp_ms)
-      display_frame = draw_result_overlay(frame_bgr, result)
-
+      landResult = landmarker.detect_for_video(mp_image, timestamp_ms)
+      display_frame = draw_result_overlay(frame_bgr, landResult)
       cv.imshow("Webcam", display_frame)
+      # "q"キーで終了
       if cv.waitKey(1) & 0xFF == ord("q"):
         break
-
+  # 終了処理
   capture.release()
   cv.destroyAllWindows()
 
