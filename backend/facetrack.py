@@ -12,7 +12,15 @@ from mediapipe.tasks.python import vision
 
 
 MODEL_PATH = "model/face_landmarker.task"
-PITCH_NEUTRAL_THRESHOLD_DEG = 5.0
+
+# 顔認識のベクトルクラス
+class FaceVector:
+    def __init__(self, x, y):
+        self.x = x # 顔の向き
+        self.y = y # 目線の高さ
+    
+    def __repr__(self):
+        return f"({self.x}, {self.y})"
 
 # カメラを開く関数
 def open_camera(camera_index=0):
@@ -53,11 +61,7 @@ def build_result_lines(result, angles=None):
     lines.append(f"Blendshape: {top_blendshape.category_name} {top_blendshape.score:.2f}")
 
   if angles:
-    data = json.loads(angles)
-    lines.append(f"Yaw:   {data['yaw']}°")
-    lines.append(f"Pitch: {data['pitch']}°")
-    lines.append(f"YawVector:  {data['yaw']}°")
-    lines.append(f"Pitch zone: {data['pitch_zone']}")
+    lines.append(f"FaceVector:   {angles}")
 
   lines.append("Press 'q' to quit")
   return lines
@@ -81,29 +85,12 @@ def get_angle(landResult):
             # 上下の傾き (Pitch)
             pitch = math.atan2(r32, r33)
 
-            # 左右の傾き (Roll)
-            roll = math.atan2(r21, r11)
-
             # ラジアンを度数法(degree)に変換
             yaw_deg = max(-90.0, min(90.0, math.degrees(yaw)))
             pitch_deg = math.degrees(pitch) * -1
-            roll_deg = math.degrees(roll)
 
-            if pitch_deg <= -PITCH_NEUTRAL_THRESHOLD_DEG:
-              pitch_zone = -1
-            elif pitch_deg >= PITCH_NEUTRAL_THRESHOLD_DEG:
-              pitch_zone = 1
-            else:
-              pitch_zone = 0
-
-            # JSON で返す
-            result = {
-              "yaw": round(yaw_deg, 2),
-              "pitch": round(pitch_deg, 2),
-              "roll": round(roll_deg, 2),
-              "pitch_zone": pitch_zone,
-            }
-            return json.dumps(result)
+            # ベクトルクラスで返す
+            return FaceVector(round(yaw_deg, 2), round(pitch_deg, 2))
     return None
   
 
