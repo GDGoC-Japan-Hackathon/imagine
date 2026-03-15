@@ -7,6 +7,7 @@ from mediapipe.tasks.python import vision
 
 
 MODEL_PATH = "model/face_landmarker.task"
+NEXT_CHECK_INTERVAL_MS = 2000
 
 # 顔認識のベクトルクラス
 class FaceVector:
@@ -118,6 +119,10 @@ def draw_result_overlay(frame_bgr, result):
     )
 
   return blended
+
+# 次の顔認識チェックのタイムスタンプをリセットする関数
+def reset_nextcheck():
+  return  int(time.time() * 1000 + NEXT_CHECK_INTERVAL_MS)
 
 # メインループ
 def main():
