@@ -96,9 +96,8 @@ def get_angle(landResult):
   
 
 # 結果をフレームにオーバーレイ表示する関数
-def draw_result_overlay(frame_bgr, result):
+def draw_result_overlay(frame_bgr, result, angles):
   overlay = frame_bgr.copy()
-  angles = get_angle(result)
   lines = build_result_lines(result, angles)
 
   panel_height = 30 + len(lines) * 28
@@ -124,6 +123,29 @@ def draw_result_overlay(frame_bgr, result):
 def reset_nextcheck():
   return  int(time.time() * 1000 + NEXT_CHECK_INTERVAL_MS)
 
+# 顔の向きと目線の高さが動いていないかを判定する関数
+def is_gaze_not_moving(current_angles, previous_angles, ratio_threshold=8):
+  if current_angles is None or previous_angles is None:
+    return False
+
+  delta = current_angles - previous_angles
+  if delta.x == 0 or delta.y == 0:
+   return True
+
+  return abs(delta.x / delta.y) <= ratio_threshold
+
+# 目線が動いていない状態を取得する関数
+def get_GazeNotMoving(mp_image,faceVector,isGazeNotMoving):
+  if faceVector is not None:
+    if isGazeNotMoving:
+      print("目線が動いていません")
+      return mp_image
+    else:
+      print("目線が動いています")
+  else:
+    print("顔が検出されていません")
+  return None
+
 # メインループ
 def main():
   base_options = mp.tasks.BaseOptions(model_asset_path=MODEL_PATH)
@@ -138,19 +160,42 @@ def main():
   if capture is None:
     raise RuntimeError("Webカメラを開始できませんでした。")
   with vision.FaceLandmarker.create_from_options(options) as landmarker:
+    lastfacevector = None
+    nexttimestamp_ms = reset_nextcheck()
+    isGazeNotMoving = False # 目線が動いていない状態を追跡するフラグ
+
     while True:
       success, frame_bgr = read_frame(capture)
       if not success:
         print("カメラからフレームを取得できませんでした。")
         break
-
       frame_rgb = cv.cvtColor(frame_bgr, cv.COLOR_BGR2RGB)
       mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
 
       timestamp_ms = int(time.time() * 1000)
       landResult = landmarker.detect_for_video(mp_image, timestamp_ms)
-      display_frame = draw_result_overlay(frame_bgr, landResult)
+      angles = get_angle(landResult)
+      display_frame = draw_result_overlay(frame_bgr, landResult, angles)
       cv.imshow("Webcam", display_frame)
+      # 顔認識のベクトルを更新する
+      if angles is not None:
+        if is_gaze_not_moving(angles, lastfacevector):
+          isGazeNotMoving = True
+        else:
+          print("目線が動いています")
+          isGazeNotMoving = False
+          nexttimestamp_ms = reset_nextcheck()
+        lastfacevector = angles
+      # 一定時間経過したらベクトルをリセットして表示する
+      if(timestamp_ms >= nexttimestamp_ms):
+        print(f"FaceVector: {lastfacevector}")
+        currentGaze = get_GazeNotMoving(mp_image, lastfacevector, isGazeNotMoving)
+        # 目線が動いていない状態を取得して表示する
+        if currentGaze is not None:
+          print("目線が動いていない状態を検出しました。")
+
+        nexttimestamp_ms = reset_nextcheck()
+        
       # "q"キーで終了
       if cv.waitKey(1) & 0xFF == ord("q"):
         break
