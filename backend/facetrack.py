@@ -15,12 +15,17 @@ MODEL_PATH = "model/face_landmarker.task"
 
 # 顔認識のベクトルクラス
 class FaceVector:
-    def __init__(self, x, y):
-        self.x = x # 顔の向き
-        self.y = y # 目線の高さ
-    
-    def __repr__(self):
-        return f"({self.x}, {self.y})"
+  def __init__(self, x, y):
+    self.x = x # 顔の向き
+    self.y = y # 目線の高さ
+
+  def __sub__(self, other):
+    if not isinstance(other, FaceVector):
+      return NotImplemented
+    return FaceVector(self.x - other.x, self.y - other.y)
+
+  def __repr__(self):
+    return f"({self.x}, {self.y})"
 
 # カメラを開く関数
 def open_camera(camera_index=0):
