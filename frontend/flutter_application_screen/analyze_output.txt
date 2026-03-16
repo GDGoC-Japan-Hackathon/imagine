@@ -1,0 +1,5 @@
+Analyzing flutter_application_screen...                         
+
+warning - The value of the local variable 'initCardRight' isn't used - lib\features\dashboard\dashboard_screen.dart:224:12 - unused_local_variable
+  error - The getter 'coral' isn't defined for the type 'Colors' - lib\features\dashboard\dashboard_screen.dart:355:53 - undefined_getter
+
