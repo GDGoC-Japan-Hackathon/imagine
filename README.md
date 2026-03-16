@@ -1,3 +1,2 @@
 # imagine
 ハッカソンチーム: Imagine
-あ
