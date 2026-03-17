@@ -2,11 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
 import '../../core/theme/app_colors.dart';
 import '../dashboard/dashboard_screen.dart';
+import 'analysis_model.dart';
 
 enum AnalysisPhase { generating, peakPulse, convergence, reveal, complete }
 
 class AnalysisScreen extends StatefulWidget {
-  const AnalysisScreen({super.key});
+  final AnalysisData data;
+
+  const AnalysisScreen({
+    super.key,
+    this.data = AnalysisData.defaultData,
+  });
 
   @override
   State<AnalysisScreen> createState() => _AnalysisScreenState();
@@ -478,7 +484,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
   Widget _buildImageWithFallback() {
     return Image.asset(
-      'assets/brewery.png',
+      widget.data.imagePath,
       fit: BoxFit.cover,
       errorBuilder: (context, error, stackTrace) {
         return Container(
@@ -517,9 +523,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
                 color: const Color(0xFFFFFAD6),
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: const Text(
-                "HISTORICAL SITE",
-                style: TextStyle(
+              child: Text(
+                widget.data.tag,
+                style: const TextStyle(
                   color: Color(0xFFAC8B18),
                   fontWeight: FontWeight.w800,
                   fontSize: 11,
@@ -532,9 +538,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
             // Title
             SlideTransition(
               position: _titleSlideIn,
-              child: const Text(
-                "Traditional Soy Sauce Brewery",
-                style: TextStyle(
+              child: Text(
+                widget.data.title,
+                style: const TextStyle(
                   fontSize: 34,
                   fontWeight: FontWeight.w900,
                   color: AppColors.textPrimary,
@@ -549,10 +555,10 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
             children: [
               Icon(Icons.calendar_today, size: 16, color: const Color(0xFF52A574)),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  "Built 1920 • 0.2 miles away",
-                  style: TextStyle(
+                  widget.data.subtitle,
+                  style: const TextStyle(
                     color: Color(0xFF52A574), // Greenish
                     fontWeight: FontWeight.bold,
                     fontSize: 14,
@@ -564,9 +570,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
             const SizedBox(height: 24),
       
             // Description
-            const Text(
-              "A preserved historical brewery showcasing traditional fermentation methods and architectural heritage from the early 20th century. Experience the authentic brewing process of artisanal soy sauce.",
-              style: TextStyle(
+            Text(
+              widget.data.description,
+              style: const TextStyle(
                 color: Color(0xFF5C626C),
                 fontSize: 15,
                 height: 1.6,
