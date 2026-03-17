@@ -6,7 +6,7 @@ import cv2 as cv
 import mediapipe as mp
 from mediapipe.tasks.python import vision
 from facetrackAnalyzer import is_facetrack_successed
-from camera import Camera
+from incamera import get_vision,release_camera
 
 MODEL_PATH = "model/face_landmarker.task"
 NEXT_CHECK_INTERVAL_MS = 2000
@@ -120,24 +120,19 @@ def initialize():
     output_facial_transformation_matrixes=True,
   )
 
-  camera = Camera(0)
   print("Face Tracker initialized.")
-  return camera, options
+  return options
 
-async def scan_face(camera: Camera, options):
+async def scan_face(options):
   with vision.FaceLandmarker.create_from_options(options) as landmarker:
     last_face_vectors = {}   # face_index -> FaceVector
     face_successes = {}      # face_index -> bool
     nexttimestamp_ms = reset_nextcheck()
 
     while True:
-      success, frame_bgr = camera.read_frame()
+      success, frame_bgr,mp_image = get_vision()
       if not success:
-        print("カメラからフレームを取得できませんでした。")
         break
-      frame_rgb = cv.cvtColor(frame_bgr, cv.COLOR_BGR2RGB)
-      mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
-
       timestamp_ms = int(time.time() * 1000)
       landResult = landmarker.detect_for_video(mp_image, timestamp_ms)
       angles_list = get_angle(landResult)
@@ -176,6 +171,6 @@ async def scan_face(camera: Camera, options):
         break
       await asyncio.sleep(0.1)  # 非同期で少し待機してUIを更新
   # 終了処理
-  camera.release()
+  release_camera()
   cv.destroyAllWindows()
   return None
