@@ -1,4 +1,5 @@
 import os
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from PIL import Image
@@ -39,7 +40,8 @@ SEGMENTATION_RESPONSE_SCHEMA = {
 # ==========================================
 # 環境変数からAPIキーを取得するか、未設定の場合は直接入力を求めます
 def initialize():
-    key = os.environ.get('GEMINI_API_KEY')
+    load_dotenv()
+    key = os.getenv('GOOGLE_API_KEY')
     if not key:
         print("環境変数 'GEMINI_API_KEY' が見つかりません。")
         key = input("Gemini APIキーを入力してください: ").strip()
