@@ -1,3 +1,4 @@
+import asyncio
 import cv2 as cv
 import mediapipe as mp
 from camera import Camera

@@ -5,7 +5,7 @@ import time
 import cv2 as cv
 import mediapipe as mp
 from mediapipe.tasks.python import vision
-from facetrackAnalyzer import is_facetrack_successed
+from analyze_facetrack import is_facetrack_successed
 from incamera import get_vision,release_camera
 
 MODEL_PATH = "model/face_landmarker.task"
