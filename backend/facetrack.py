@@ -1,10 +1,11 @@
+import asyncio
 import math
 import time
 
 import cv2 as cv
 import mediapipe as mp
 from mediapipe.tasks.python import vision
-
+from facetrackAnalyzer import is_facetrack_successed
 
 MODEL_PATH = "model/face_landmarker.task"
 NEXT_CHECK_INTERVAL_MS = 2000
@@ -123,21 +124,10 @@ def draw_result_overlay(frame_bgr, result, angles):
 def reset_nextcheck():
   return  int(time.time() * 1000 + NEXT_CHECK_INTERVAL_MS)
 
-# 顔の向きと目線の高さが動いていないかを判定する関数
-def is_gaze_not_moving(current_angles, previous_angles, ratio_threshold=8):
-  if current_angles is None or previous_angles is None:
-    return False
-
-  delta = current_angles - previous_angles
-  if delta.x == 0 or delta.y == 0:
-   return True
-
-  return abs(delta.x / delta.y) <= ratio_threshold
-
 # 目線が動いていない状態を取得する関数
-def get_GazeNotMoving(mp_image,faceVector,isGazeNotMoving):
+def get_GazeNotMoving(mp_image,faceVector,isFaceTrackSuccessed):
   if faceVector is not None:
-    if isGazeNotMoving:
+    if isFaceTrackSuccessed:
       print("目線が動いていません")
       return mp_image
     else:
@@ -146,8 +136,9 @@ def get_GazeNotMoving(mp_image,faceVector,isGazeNotMoving):
     print("顔が検出されていません")
   return None
 
-# メインループ
-def main():
+# 初期化処理
+def initialize():
+  print("Initializing Face Tracker...")
   base_options = mp.tasks.BaseOptions(model_asset_path=MODEL_PATH)
   options = vision.FaceLandmarkerOptions(
     base_options=base_options,
@@ -159,10 +150,14 @@ def main():
   capture = open_camera(0)
   if capture is None:
     raise RuntimeError("Webカメラを開始できませんでした。")
+  print("Face Tracker initialized.")
+  return capture, options
+
+async def scan_face(capture, options):
   with vision.FaceLandmarker.create_from_options(options) as landmarker:
     lastfacevector = None
     nexttimestamp_ms = reset_nextcheck()
-    isGazeNotMoving = False # 目線が動いていない状態を追跡するフラグ
+    isFaceTrackSuccessed = False # 目線が動いていない状態を追跡するフラグ
 
     while True:
       success, frame_bgr = read_frame(capture)
@@ -179,30 +174,29 @@ def main():
       cv.imshow("Webcam", display_frame)
       # 顔認識のベクトルを更新する
       if angles is not None:
-        if is_gaze_not_moving(angles, lastfacevector):
-          isGazeNotMoving = True
+        if is_facetrack_successed(angles, lastfacevector):
+          isFaceTrackSuccessed = True
         else:
           print("目線が動いています")
-          isGazeNotMoving = False
+          isFaceTrackSuccessed = False
           nexttimestamp_ms = reset_nextcheck()
         lastfacevector = angles
       # 一定時間経過したらベクトルをリセットして表示する
       if(timestamp_ms >= nexttimestamp_ms):
         print(f"FaceVector: {lastfacevector}")
-        currentGaze = get_GazeNotMoving(mp_image, lastfacevector, isGazeNotMoving)
+        currentGaze = get_GazeNotMoving(mp_image, lastfacevector, isFaceTrackSuccessed)
         # 目線が動いていない状態を取得して表示する
         if currentGaze is not None:
           print("目線が動いていない状態を検出しました。")
+          return currentGaze
 
         nexttimestamp_ms = reset_nextcheck()
         
       # "q"キーで終了
       if cv.waitKey(1) & 0xFF == ord("q"):
         break
+      await asyncio.sleep(0.1)  # 非同期で少し待機してUIを更新
   # 終了処理
   capture.release()
   cv.destroyAllWindows()
-
-
-if __name__ == "__main__":
-  main()
+  return None

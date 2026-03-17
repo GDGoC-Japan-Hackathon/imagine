@@ -1,2 +1,3 @@
 /backend/model
 /backend/__pycache__
+.env
