@@ -21,8 +21,6 @@ ANALYSIS_RESPONSE_SCHEMA = {
 # セグメンテーションのレスポンススキーマ
 SEGMENTATION_RESPONSE_SCHEMA = {
     "type": "ARRAY",
-    "minItems": 1,
-    "maxItems": 1,
     "items": {
         "type": "OBJECT",
         "required": ["label", "polygon"],
