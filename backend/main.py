@@ -7,7 +7,8 @@ async def main_loop(capture, options):
         if result is None:
             return
         else:
-            print(f"Detected FaceVector: {result}")
+            mp_image, stable_vectors = result
+            print(f"Detected stable FaceVectors ({len(stable_vectors)} face(s)): {stable_vectors}")
             
 
 async def main():
