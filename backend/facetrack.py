@@ -6,6 +6,7 @@ import cv2 as cv
 import mediapipe as mp
 from mediapipe.tasks.python import vision
 from facetrackAnalyzer import is_facetrack_successed
+from camera import Camera
 
 MODEL_PATH = "model/face_landmarker.task"
 NEXT_CHECK_INTERVAL_MS = 2000
@@ -23,24 +24,6 @@ class FaceVector:
 
   def __repr__(self):
     return f"({self.x}, {self.y})"
-
-# カメラを開く関数
-def open_camera(camera_index=0):
-  for backend in (cv.CAP_DSHOW, cv.CAP_MSMF, cv.CAP_ANY):
-    capture = cv.VideoCapture(camera_index, backend)
-    if capture.isOpened():
-      return capture
-    capture.release()
-  return None
-
-# カメラからフレームを読み取る関数
-def read_frame(capture, retries=30, delay_seconds=0.05):
-  for _ in range(retries):
-    success, frame_bgr = capture.read()
-    if success and frame_bgr is not None:
-      return True, frame_bgr
-    time.sleep(delay_seconds)
-  return False, None
 
 # 結果から表示用のテキスト行を構築する関数
 def build_result_lines(result, angles_list=None):
@@ -137,20 +120,18 @@ def initialize():
     output_facial_transformation_matrixes=True,
   )
 
-  capture = open_camera(0)
-  if capture is None:
-    raise RuntimeError("Webカメラを開始できませんでした。")
+  camera = Camera(0)
   print("Face Tracker initialized.")
-  return capture, options
+  return camera, options
 
-async def scan_face(capture, options):
+async def scan_face(camera: Camera, options):
   with vision.FaceLandmarker.create_from_options(options) as landmarker:
     last_face_vectors = {}   # face_index -> FaceVector
     face_successes = {}      # face_index -> bool
     nexttimestamp_ms = reset_nextcheck()
 
     while True:
-      success, frame_bgr = read_frame(capture)
+      success, frame_bgr = camera.read_frame()
       if not success:
         print("カメラからフレームを取得できませんでした。")
         break
@@ -195,6 +176,6 @@ async def scan_face(capture, options):
         break
       await asyncio.sleep(0.1)  # 非同期で少し待機してUIを更新
   # 終了処理
-  capture.release()
+  camera.release()
   cv.destroyAllWindows()
   return None
