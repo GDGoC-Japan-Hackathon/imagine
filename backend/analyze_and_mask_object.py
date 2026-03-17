@@ -4,6 +4,7 @@ from google import genai
 from google.genai import types
 from PIL import Image
 import json
+import mediapipe as mp
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import tkinter as tk
@@ -70,11 +71,17 @@ def open_image_dialog():
     return file_path
 
 # ルーチン
-def main(file_path = None,pan = None,tilt = None):
+def analyze_and_mask_object(file_path = None,pan = None,tilt = None):
+    if 'client' not in globals():
+        initialize()
+
     img,location_desc, norm_x, norm_y = image_analysis_and_masking(file_path, pan, tilt)
+    if img is None:
+        return "Null", "画像が選択されませんでした。", []
+
     target_name,guide_desc = analyze_image_at_location(img, location_desc)
     seg_data = create_mask_for_target(img, target_name, location_desc, norm_x, norm_y)
-    display_masked_image(img, seg_data)
+    # display_masked_image(img, seg_data)
     return target_name, guide_desc, seg_data
 
 
@@ -86,18 +93,53 @@ def convert_to_percent(pan, tilt):
     norm_y = int(percent_y * 10)
     return percent_x, percent_y, norm_x, norm_y
 
+# 注目位置の入力をベクトルから処理する関数
+def resolve_pan_tilt(pan, tilt):
+    if tilt is not None and isinstance(pan, (int, float)) and isinstance(tilt, (int, float)):
+        return float(pan), float(tilt)
+
+    if isinstance(pan, list) and pan:
+        first_vector = pan[0]
+        if hasattr(first_vector, 'x') and hasattr(first_vector, 'y'):
+            return float(first_vector.x), float(first_vector.y)
+
+    return 0.0, 0.0
+
+# 画像入力をPIL形式に変換する関数
+def to_pil_image(image_source):
+    if isinstance(image_source, Image.Image):
+        return image_source
+
+    if isinstance(image_source, str):
+        return Image.open(image_source)
+
+    if isinstance(image_source, mp.Image):
+        rgb_array = image_source.numpy_view()
+        return Image.fromarray(rgb_array)
+
+    if image_source is None:
+        selected_path = open_image_dialog()
+        if selected_path:
+            return Image.open(selected_path)
+        return None
+
+    raise ValueError(f"未対応の画像入力型です: {type(image_source)}")
+
 
 def image_analysis_and_masking(file_path = None,pan = None,tilt = None):
-    if file_path is None:
-        file_path = open_image_dialog()
-    if file_path:
+    try:
+        img = to_pil_image(file_path)
+    except Exception as e:
+        print(f"画像の読み込みに失敗しました: {e}")
+        return None, None, None, None
+
+    if img is not None:
         print(f"選択された画像: {file_path}")
-        img = Image.open(file_path)
 
         # ==========================================
         # 3. 注目位置の入力受け付けと連続座標への変換
         # ==========================================
-        if pan is None or tilt is None:
+        if pan is None and tilt is None:
             print("\n画像内の注目したい位置を数値で指定してください。")
             try:
                 pan = float(input("左右方向 (-90～90, 0が中心, マイナスが左, プラスが右): "))
@@ -108,6 +150,8 @@ def image_analysis_and_masking(file_path = None,pan = None,tilt = None):
             except ValueError:
                 print("無効な入力です。中心(0, 0)として扱います。")
                 pan, tilt = 0.0, 0.0
+
+        pan, tilt = resolve_pan_tilt(pan, tilt)
 
         percent_x, percent_y, norm_x, norm_y = convert_to_percent(pan, tilt)
         location_desc = f"画像の左端から {percent_x:.1f}%、上端から {percent_y:.1f}% の位置（正規化座標で [y, x] = [{norm_y}, {norm_x}] 付近）"
@@ -247,4 +291,4 @@ def display_masked_image(img, seg_data):
 
 if __name__ == "__main__":
     initialize()
-    main()
+    analyze_and_mask_object()
