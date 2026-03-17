@@ -1,12 +1,40 @@
 import os
 from google import genai
+from google.genai import types
 from PIL import Image
 import json
-import re
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import tkinter as tk
 from tkinter import filedialog
+
+# 画像分析のレスポンススキーマ
+ANALYSIS_RESPONSE_SCHEMA = {
+    "type": "OBJECT",
+    "required": ["名前", "解説"],
+    "properties": {
+        "名前": {"type": "STRING"},
+        "解説": {"type": "STRING"}
+    }
+}
+
+# セグメンテーションのレスポンススキーマ
+SEGMENTATION_RESPONSE_SCHEMA = {
+    "type": "ARRAY",
+    "minItems": 1,
+    "maxItems": 1,
+    "items": {
+        "type": "OBJECT",
+        "required": ["label", "polygon"],
+        "properties": {
+            "label": {"type": "STRING"},
+            "polygon": {
+                "type": "ARRAY",
+                "items": {"type": "NUMBER"}
+            }
+        }
+    }
+}
 
 # ==========================================
 # 1. APIキーの設定
@@ -45,9 +73,9 @@ def open_image_dialog():
 def main(file_path = None,pan = None,tilt = None):
     img,location_desc, norm_x, norm_y = image_analysis_and_masking(file_path, pan, tilt)
     target_name,guide_desc = analyze_image_at_location(img, location_desc)
-    seg_json_match = create_mask_for_target(img, target_name, location_desc, norm_x, norm_y)
-    display_masked_image(img, seg_json_match)
-    return target_name, guide_desc, seg_json_match
+    seg_data = create_mask_for_target(img, target_name, location_desc, norm_x, norm_y)
+    display_masked_image(img, seg_data)
+    return target_name, guide_desc, seg_data
 
 
 
@@ -114,29 +142,27 @@ def analyze_image_at_location(img, location_desc):
 
     response_analysis = client.models.generate_content(
         model=model_name,
-        contents=[user_prompt, img]
+        contents=[user_prompt, img],
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=ANALYSIS_RESPONSE_SCHEMA
+        )
     )
-    analysis_text = response_analysis.text
-
-    analysis_json_match = re.search(r'\{.*\}', analysis_text, re.DOTALL)
+    analysis_text = response_analysis.text or "{}"
     target_name = "指定位置の対象物"
 
-    if analysis_json_match:
-        try:
-            analysis_data = json.loads(analysis_json_match.group())
-            target_name = analysis_data.get("名前", "指定位置の対象物")
-            guide_desc = analysis_data.get("解説", "解説を取得できませんでした。")
+    try:
+        analysis_data = json.loads(analysis_text)
+        target_name = analysis_data.get("名前", "指定位置の対象物")
+        guide_desc = analysis_data.get("解説", "解説を取得できませんでした。")
 
-            print("\n" + "=" * 50)
-            print(f"🎯 【検出された対象物】: {target_name}")
-            print("=" * 50)
-            print(f"✨ 【アシスタントの解説】\n{guide_desc}\n")
-            return target_name, guide_desc
-        except json.JSONDecodeError:
-            print("画像解析のJSONパースに失敗しました。")
-            return "Null", "解説を取得できませんでした。"
-    else:
-        print("期待するJSON形式で画像解析結果が得られませんでした。")
+        print("\n" + "=" * 50)
+        print(f"🎯 【検出された対象物】: {target_name}")
+        print("=" * 50)
+        print(f"✨ 【アシスタントの解説】\n{guide_desc}\n")
+        return target_name, guide_desc
+    except json.JSONDecodeError:
+        print("画像解析のJSONパースに失敗しました。")
     return "Null", "解説を取得できませんでした。"
 
 # ==========================================
@@ -157,19 +183,27 @@ def create_mask_for_target(img, target_name, location_desc, norm_x, norm_y):
 
     response_seg = client.models.generate_content(
         model=model_name,
-        contents=[seg_prompt, img]
+        contents=[seg_prompt, img],
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=SEGMENTATION_RESPONSE_SCHEMA
+        )
     )
-    seg_raw_text = response_seg.text
-    seg_json_match = re.search(r'\[\s*\{.*\}\s*\]', seg_raw_text, re.DOTALL)
-    return seg_json_match
+    seg_raw_text = response_seg.text or "[]"
+    try:
+        seg_data = json.loads(seg_raw_text)
+        if isinstance(seg_data, list):
+            return seg_data
+    except json.JSONDecodeError:
+        pass
+    return []
 
 # ==========================================
 # 6. マスク付き画像の作成と表示
 # ==========================================
-def display_masked_image(img, seg_json_match):
-    if seg_json_match:
+def display_masked_image(img, seg_data):
+    if seg_data:
         try:
-            seg_data = json.loads(seg_json_match.group())
             width, height = img.size
 
             fig, ax = plt.subplots(figsize=(12, 12))
