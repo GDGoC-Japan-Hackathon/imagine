@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
 import '../../core/theme/app_colors.dart';
@@ -7,11 +9,13 @@ import 'analysis_model.dart';
 enum AnalysisPhase { generating, peakPulse, convergence, reveal, complete }
 
 class AnalysisScreen extends StatefulWidget {
-  final AnalysisData data;
+  final Future<AnalysisData>? analysisFuture;
+  final AnalysisData? fallbackData;
 
   const AnalysisScreen({
     super.key,
-    this.data = AnalysisData.defaultData,
+    this.analysisFuture,
+    this.fallbackData,
   });
 
   @override
@@ -21,6 +25,7 @@ class AnalysisScreen extends StatefulWidget {
 class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStateMixin {
   AnalysisPhase _phase = AnalysisPhase.generating;
   late AnimationController _transitionController;
+  late AnalysisData _data;
 
   // Animation values
   late Animation<double> _imageDissolve;
@@ -33,6 +38,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
   @override
   void initState() {
     super.initState();
+    _data = widget.fallbackData ?? AnalysisData.defaultData;
+    
     _transitionController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 500), // Motion Specs: 500ms
@@ -86,6 +93,30 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
       }
     });
 
+    if (widget.analysisFuture != null) {
+      widget.analysisFuture!.then((result) {
+        if (mounted) {
+          setState(() {
+            _data = result;
+          });
+          _startTransition();
+        }
+      }).catchError((e) {
+        if (mounted) {
+          setState(() {
+            _data = AnalysisData(
+              tag: "ERROR",
+              title: "Analysis Failed",
+              subtitle: "Oops, something went wrong.",
+              description: e.toString(),
+              imagePath: _data.imagePath,
+            );
+          });
+          _startTransition();
+        }
+      });
+    }
+
   }
 
   void _startTransition() {
@@ -125,7 +156,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {
-        if (_phase == AnalysisPhase.generating) {
+        if (_phase == AnalysisPhase.generating && widget.analysisFuture == null) {
           _startTransition();
         } else if (_phase == AnalysisPhase.complete) {
           _navigateToDashboard();
@@ -483,8 +514,16 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
 
   Widget _buildImageWithFallback() {
-    return Image.asset(
-      widget.data.imagePath,
+    final imagePath = _data.imagePath;
+    final ImageProvider imageProvider;
+    if (imagePath.startsWith('assets/')) {
+      imageProvider = AssetImage(imagePath);
+    } else {
+      imageProvider = FileImage(File(imagePath));
+    }
+
+    return Image(
+      image: imageProvider,
       fit: BoxFit.cover,
       errorBuilder: (context, error, stackTrace) {
         return Container(
@@ -524,7 +563,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Text(
-                widget.data.tag,
+                _data.tag,
                 style: const TextStyle(
                   color: Color(0xFFAC8B18),
                   fontWeight: FontWeight.w800,
@@ -539,7 +578,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
             SlideTransition(
               position: _titleSlideIn,
               child: Text(
-                widget.data.title,
+                _data.title,
                 style: const TextStyle(
                   fontSize: 34,
                   fontWeight: FontWeight.w900,
@@ -557,7 +596,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  widget.data.subtitle,
+                  _data.subtitle,
                   style: const TextStyle(
                     color: Color(0xFF52A574), // Greenish
                     fontWeight: FontWeight.bold,
@@ -571,7 +610,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
       
             // Description
             Text(
-              widget.data.description,
+              _data.description,
               style: const TextStyle(
                 color: Color(0xFF5C626C),
                 fontSize: 15,

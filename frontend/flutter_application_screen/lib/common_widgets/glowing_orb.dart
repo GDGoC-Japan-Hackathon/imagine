@@ -26,6 +26,8 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
   Offset _currentEyeOffset = Offset.zero;
   Offset _targetEyeOffset = Offset.zero;
   bool _isBlinking = false;
+  bool _isStable = false;
+  bool _isTracking = false;
   
   // Interactive Pull variables
   Offset _currentPullOffset = Offset.zero;
@@ -85,6 +87,44 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
     _startRandomBlinking();
   }
 
+  void setStable(bool stable) {
+    if (_isStable == stable) return;
+    setState(() {
+      _isStable = stable;
+      if (stable) {
+        _isBlinking = false;
+        _breathingController.duration = const Duration(milliseconds: 1000);
+        _breathingController.repeat(reverse: true);
+      } else {
+        _breathingController.duration = const Duration(seconds: 4);
+        _breathingController.repeat(reverse: true);
+      }
+    });
+  }
+
+  void setFaceOffset(Offset? offset) {
+    if (offset == null) {
+      if (_isTracking) {
+        setState(() {
+          _isTracking = false;
+        });
+        _startRandomLooking();
+      }
+      return;
+    }
+
+    _isTracking = true;
+    // Map camera normalized coordinates to orb displacement
+    // Let's assume input offset is roughly -30 to 30 for meaningful range
+    final dx = offset.dx.clamp(-1.0, 1.0) * (widget.size * 0.2);
+    final dy = offset.dy.clamp(-1.0, 1.0) * (widget.size * 0.2);
+    
+    setState(() {
+      _targetEyeOffset = Offset(dx, dy);
+      _currentEyeOffset = Offset.lerp(_currentEyeOffset, _targetEyeOffset, 0.4) ?? _targetEyeOffset;
+    });
+  }
+
   void pullTowards(Offset tapDelta) async {
     final distance = tapDelta.distance;
     final maxPull = widget.size * 0.3; // Pull up to 30% of size
@@ -130,6 +170,10 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
   void _startRandomLooking() async {
     final random = math.Random();
     while (mounted) {
+      if (_isTracking) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        continue;
+      }
       // 1. Wait a random amount of time (the "tame" or pause)
       final pauseDuration = Duration(milliseconds: 500 + random.nextInt(2000));
       await Future.delayed(pauseDuration);
@@ -175,13 +219,13 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
             height: widget.size,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: AppColors.orbBackground,
+              color: _isStable ? const Color(0xFFE2F063) : AppColors.orbBackground,
               boxShadow: [
                 // Inner glow (Breathing)
                 BoxShadow(
-                  color: AppColors.orbGlowYellow.withValues(alpha: 0.5 + (_breathingAnimation.value * 0.3)),
-                  blurRadius: 30 + (_breathingAnimation.value * 10),
-                  spreadRadius: 10 + (_breathingAnimation.value * 5),
+                  color: (_isStable ? Colors.white : AppColors.orbGlowYellow).withValues(alpha: 0.5 + (_breathingAnimation.value * 0.3)),
+                  blurRadius: (_isStable ? 40 : 30) + (_breathingAnimation.value * 15),
+                  spreadRadius: (_isStable ? 15 : 10) + (_breathingAnimation.value * 8),
                 ),
                 // Outer glow (Breathing)
                 BoxShadow(
@@ -216,11 +260,24 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       _buildEye(),
-                      SizedBox(width: widget.size * 0.15),
+                      SizedBox(width: widget.size * (_isStable ? 0.2 : 0.15)),
                       _buildEye(),
                     ],
                   ),
                 ),
+                if (_isStable)
+                   Center(
+                     child: Container(
+                       width: widget.size * 0.4,
+                       height: 2,
+                       decoration: BoxDecoration(
+                         color: Colors.white.withValues(alpha: 0.5 * _breathingAnimation.value),
+                         boxShadow: [
+                           BoxShadow(color: Colors.white, blurRadius: 4 * _breathingAnimation.value),
+                         ],
+                       ),
+                     ),
+                   ),
               ],
             ),
           ),
@@ -232,14 +289,15 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
   Widget _buildEye() {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 100),
-      width: widget.size * 0.06,
-      height: _isBlinking ? 0.0 : widget.size * 0.06,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        shape: BoxShape.circle,
+      width: _isStable ? widget.size * 0.08 : widget.size * 0.06,
+      height: _isBlinking ? 0.0 : (_isStable ? 2.0 : widget.size * 0.06),
+      decoration: BoxDecoration(
+        color: _isStable ? Colors.black : Colors.white,
+        shape: _isStable ? BoxShape.rectangle : BoxShape.circle,
+        borderRadius: _isStable ? BorderRadius.circular(1) : null,
         boxShadow: [
           BoxShadow(
-            color: Colors.white54,
+            color: _isStable ? Colors.black26 : Colors.white54,
             blurRadius: 5,
             spreadRadius: 2,
           ),
