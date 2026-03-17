@@ -1,5 +1,5 @@
 import os
-import google.generativeai as genai
+from google import genai
 from PIL import Image
 import json
 import re
@@ -20,8 +20,8 @@ if not key:
 if not key:
     raise ValueError("APIキーが入力されませんでした。プログラムを終了します。")
 
-genai.configure(api_key=key)
-model = genai.GenerativeModel('gemini-3-flash-preview')
+client = genai.Client(api_key=key)
+model_name = 'gemini-3-flash-preview'
 
 # ==========================================
 # 2. 画像の選択 (Windowsのファイルダイアログを使用)
@@ -84,7 +84,10 @@ if file_path:
       "解説": "こちらに写っておりますのは…から始まるような、丁寧で詳細な解説文"
     }}'''
 
-    response_analysis = model.generate_content([user_prompt, img])
+    response_analysis = client.models.generate_content(
+        model=model_name,
+        contents=[user_prompt, img]
+    )
     analysis_text = response_analysis.text
     
     analysis_json_match = re.search(r'\{.*\}', analysis_text, re.DOTALL)
@@ -120,7 +123,10 @@ if file_path:
     Return the result as a valid JSON array containing exactly ONE object. Do not include markdown formatting like ```json.
     """
 
-    response_seg = model.generate_content([seg_prompt, img])
+    response_seg = client.models.generate_content(
+        model=model_name,
+        contents=[seg_prompt, img]
+    )
     seg_raw_text = response_seg.text
     seg_json_match = re.search(r'\[\s*\{.*\}\s*\]', seg_raw_text, re.DOTALL)
 
