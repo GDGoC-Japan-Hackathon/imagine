@@ -30,11 +30,12 @@ class FaceLandmarkerHelper(
             val optionsBuilder =
                 FaceLandmarker.FaceLandmarkerOptions.builder()
                     .setBaseOptions(baseOptionsBuilder.build())
-                    .setMinFaceDetectionConfidence(0.2f)
-                    .setMinTrackingConfidence(0.2f)
-                    .setMinFacePresenceConfidence(0.2f)
+                    .setMinFaceDetectionConfidence(0.1f)
+                    .setMinTrackingConfidence(0.1f)
+                    .setMinFacePresenceConfidence(0.1f)
                     .setResultListener(this::returnDetectionResult)
                     .setErrorListener(this::returnDetectionError)
+                    .setOutputFaceBlendshapes(true)
                     .setRunningMode(RunningMode.LIVE_STREAM)
 
             faceLandmarker = FaceLandmarker.createFromOptions(context, optionsBuilder.build())
