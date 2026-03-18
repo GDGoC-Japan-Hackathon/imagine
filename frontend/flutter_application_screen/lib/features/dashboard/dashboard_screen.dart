@@ -534,158 +534,146 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           flex: 10,
           child: Padding(
             padding: const EdgeInsets.only(right: 60),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                return SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(vertical: 24),
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                    child: IntrinsicHeight(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    "IMAGINE",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 48, 
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 2.0,
+                    ),
+                  ),
+                ),
+                const FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    "AI コンシェルジュ",
+                    style: TextStyle(
+                      color: Color(0xB3FFFFFF), // Colors.white.withOpacity(0.7)
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 4.0,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 40),
+                
+                // Status Glass Plate
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white.withOpacity(0.1), width: 1),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
                         children: [
-                          const FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              "IMAGINE",
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 48, 
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: 2.0,
-                              ),
-                            ),
-                          ),
-                          const FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              "AI コンシェルジュ",
-                              style: TextStyle(
-                                color: Color(0xB3FFFFFF), // Colors.white.withOpacity(0.7)
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 4.0,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 40),
-                          
-                          // Status Glass Plate
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                            width: 8,
+                            height: 8,
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: Colors.white.withOpacity(0.1), width: 1),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Row(
-                                  children: [
-                                    Container(
-                                      width: 8,
-                                      height: 8,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: _hasFaceInFrame ? const Color(0xFFE2F063) : Colors.white24,
-                                        boxShadow: [
-                                          if (_hasFaceInFrame)
-                                            const BoxShadow(color: Color(0xFFE2F063), blurRadius: 4, spreadRadius: 1),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: AnimatedSwitcher(
-                                        duration: const Duration(milliseconds: 500),
-                                        layoutBuilder: (Widget? currentChild, List<Widget> previousChildren) {
-                                          return Stack(
-                                            alignment: Alignment.centerLeft,
-                                            children: <Widget>[
-                                              ...previousChildren,
-                                              if (currentChild != null) currentChild,
-                                            ],
-                                          );
-                                        },
-                                        transitionBuilder: (Widget child, Animation<double> animation) {
-                                          return FadeTransition(
-                                            opacity: animation,
-                                            child: SlideTransition(
-                                              position: Tween<Offset>(
-                                                begin: const Offset(0, 0.2),
-                                                end: Offset.zero,
-                                              ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
-                                              child: child,
-                                            ),
-                                          );
-                                        },
-                                        child: Text(
-                                          _statusMessage.toUpperCase(),
-                                          key: ValueKey<String>(_statusMessage),
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.bold,
-                                            letterSpacing: 1.5,
-                                          ),
-                                          softWrap: true,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 12),
-                                AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 500),
-                                  transitionBuilder: (Widget child, Animation<double> animation) {
-                                    return FadeTransition(
-                                      opacity: animation,
-                                      child: SlideTransition(
-                                        position: Tween<Offset>(
-                                          begin: const Offset(0, 0.2),
-                                          end: Offset.zero,
-                                        ).animate(animation),
-                                        child: child,
-                                      ),
-                                    );
-                                  },
-                                  child: Text(
-                                    _hasFaceInFrame ? "心の動きを解析しています" : "あなたが景色に注目すると、旅が深まります",
-                                    key: ValueKey<bool>(_hasFaceInFrame),
-                                    style: const TextStyle(
-                                      color: Colors.white60,
-                                      fontSize: 12,
-                                    ),
-                                    softWrap: true,
-                                  ),
-                                ),
+                              shape: BoxShape.circle,
+                              color: _hasFaceInFrame ? const Color(0xFFE2F063) : Colors.white24,
+                              boxShadow: [
+                                if (_hasFaceInFrame)
+                                  const BoxShadow(color: Color(0xFFE2F063), blurRadius: 4, spreadRadius: 1),
                               ],
                             ),
                           ),
-                          
-                          const SizedBox(height: 40), // Spacerの代わりに固定余白を使用
-                          
-                          // ボタン部分のオーバーフロー防止
-                          FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: Alignment.centerLeft,
-                            child: PrimaryButton(
-                              label: _skipFaceDetection ? "撮影する" : "話しかけて",
-                              icon: Icons.mic_none_outlined,
-                              onPressed: _skipFaceDetection 
-                                  ? () => _navigateToGeneratingAndAnalyze(const FaceVector(0, 0))
-                                  : _navigateToGenerating,
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 500),
+                              layoutBuilder: (Widget? currentChild, List<Widget> previousChildren) {
+                                return Stack(
+                                  alignment: Alignment.centerLeft,
+                                  children: <Widget>[
+                                    ...previousChildren,
+                                    if (currentChild != null) currentChild,
+                                  ],
+                                );
+                              },
+                              transitionBuilder: (Widget child, Animation<double> animation) {
+                                return FadeTransition(
+                                  opacity: animation,
+                                  child: SlideTransition(
+                                    position: Tween<Offset>(
+                                      begin: const Offset(0, 0.2),
+                                      end: Offset.zero,
+                                    ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
+                                    child: child,
+                                  ),
+                                );
+                              },
+                              child: Text(
+                                _statusMessage.toUpperCase(),
+                                key: ValueKey<String>(_statusMessage),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 1.5,
+                                ),
+                                softWrap: true,
+                              ),
                             ),
                           ),
                         ],
                       ),
-                    ),
+                      const SizedBox(height: 12),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 500),
+                        transitionBuilder: (Widget child, Animation<double> animation) {
+                          return FadeTransition(
+                            opacity: animation,
+                            child: SlideTransition(
+                              position: Tween<Offset>(
+                                begin: const Offset(0, 0.2),
+                                end: Offset.zero,
+                              ).animate(animation),
+                              child: child,
+                            ),
+                          );
+                        },
+                        child: Text(
+                          _hasFaceInFrame ? "心の動きを解析しています" : "あなたが景色に注目すると、旅が深まります",
+                          key: ValueKey<bool>(_hasFaceInFrame),
+                          style: const TextStyle(
+                            color: Colors.white60,
+                            fontSize: 12,
+                          ),
+                          softWrap: true,
+                        ),
+                      ),
+                    ],
                   ),
-                );
-              },
+                ),
+                
+                const SizedBox(height: 40), 
+                
+                // ボタン部分のオーバーフロー防止
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: PrimaryButton(
+                    label: _skipFaceDetection ? "撮影する" : "話しかけて",
+                    icon: Icons.mic_none_outlined,
+                    onPressed: _skipFaceDetection 
+                        ? () => _navigateToGeneratingAndAnalyze(const FaceVector(0, 0))
+                        : _navigateToGenerating,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
