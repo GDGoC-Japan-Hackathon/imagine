@@ -333,6 +333,14 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
         ? widget.size * 0.12 
         : (_isTracking ? (widget.size * (0.08 + _smileScore * 0.02)) : widget.size * 0.06);
     
+    // スマイルやスクイントで高さが減る、まばたきで閉じる
+    double eyeHeight = _isStable ? 2.0 : (_isTracking ? widget.size * 0.07 : widget.size * 0.06);
+    if (_isBlinking || blinkScore > 0.5) {
+      eyeHeight = 0.0;
+    } else if (_isTracking) {
+      // 笑顔レベルに合わせて目を細める
+      eyeHeight = eyeHeight * (1.0 - (_smileScore * 0.5 + _squintScore * 0.3)).clamp(0.1, 1.0);
+    }
 
     return Flexible(
       child: AnimatedContainer(
