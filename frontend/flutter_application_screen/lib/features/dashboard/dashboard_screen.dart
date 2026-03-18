@@ -96,14 +96,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _startFaceTracking() {
+    if (_cameraService.inCameraController == null) return;
+    if (_cameraService.inCameraController!.value.isStreamingImages) return;
+
     _cameraService.inCameraController?.startImageStream((CameraImage image) async {
       if (_isProcessing) return;
 
-      // CameraImage から ML Kit の InputImage への変換
+      // CameraImage から InputImage への変換
       final inputImage = _inputImageFromCameraImage(image);
       if (inputImage == null) return;
 
       final faces = await _mlkitDetector.processImage(inputImage);
+      if (_isProcessing || !mounted) return;
       
       if (faces.isEmpty) {
         // 500msの猶予（グレイスピリオド）を設けて、一瞬の検出失敗によるチラつきを防ぐ
@@ -114,6 +118,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               _hasFaceInFrame = false;
               _detectedFaceRect = null;
             });
+            _orbKey.currentState?.setTracking(false);
           }
         }
       } else {
@@ -121,6 +126,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (mounted) {
           if (!_hasFaceInFrame) {
             setState(() => _hasFaceInFrame = true);
+            _orbKey.currentState?.setTracking(true);
           }
           final face = faces.first;
           _detectedFaceRect = face.boundingBox;
@@ -128,7 +134,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
 
       List<FaceVector> currentFaceAngles = faces.map((face) {
-        // ML Kit は Euler角を直接返してくれる (度単位)
+        // Euler角を直接返してくれる (度単位)
         // headEulerAngleY: 左右の向き (Yaw相当)
         // headEulerAngleX: 上下の向き (Pitch相当)
         final yaw = face.headEulerAngleY ?? 0.0;
@@ -147,17 +153,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _orbKey.currentState?.setFaceOffset(null);
       }
 
-      if (stableProgress >= 1.0) {
+      if (stableProgress >= 1) {
         _isProcessing = true;
         _orbKey.currentState?.setStable(true);
-        await _cameraService.inCameraController?.stopImageStream();
         
         setState(() {
            _statusMessage = "目線が固定されました。撮影・解析を開始します...";
         });
+
+        // 1. まずインカメラのストリームを止める
+        try {
+          if (_cameraService.inCameraController?.value.isStreamingImages ?? false) {
+            await _cameraService.inCameraController?.stopImageStream();
+          }
+        } catch (e) {
+          debugPrint("Error stopping image stream: $e");
+        }
         
-        await Future.delayed(const Duration(milliseconds: 500)); // 安定状態を少し見せる
-        _navigateToGeneratingAndAnalyze(currentFaceAngles.first);
+        // 2. アウトカメラで撮影
+        final targetAngles = currentFaceAngles.first;
+        final capturedImage = await _cameraService.captureOutCameraImage();
+        
+        if (mounted) {
+          _navigateToGeneratingAndAnalyze(targetAngles, capturedImage: capturedImage);
+        }
       } else if (stableProgress > 0) {
         setState(() {
           final percent = (stableProgress * 100).toInt();
@@ -200,8 +219,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return allBytes.done().buffer.asUint8List();
   }
 
-  void _navigateToGeneratingAndAnalyze(FaceVector targetVector) {
-    final analysisFuture = _captureAndAnalyze(targetVector);
+  void _navigateToGeneratingAndAnalyze(FaceVector targetVector, {XFile? capturedImage}) {
+    final analysisFuture = _captureAndAnalyze(targetVector, preCapturedImage: capturedImage);
 
     Navigator.of(context).push(
       PageRouteBuilder(
@@ -228,8 +247,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
   }
 
-  Future<AnalysisData> _captureAndAnalyze(FaceVector targetVector) async {
-    final outImage = await _cameraService.captureOutCameraImage();
+  Future<AnalysisData> _captureAndAnalyze(FaceVector targetVector, {XFile? preCapturedImage}) async {
+    final outImage = preCapturedImage ?? await _cameraService.captureOutCameraImage();
     
     if (outImage != null) {
       final result = await _geminiService.analyzeAndMask(File(outImage.path), targetVector.x, targetVector.y);

@@ -1,8 +1,13 @@
 import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
+import 'package:camera/camera.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import 'package:flutter/foundation.dart';
 import '../../core/theme/app_colors.dart';
+import '../camera/services/camera_service.dart';
+import '../camera/services/face_tracker_service.dart';
+import '../camera/models/face_vector.dart';
 import '../dashboard/dashboard_screen.dart';
 import 'analysis_model.dart';
 
@@ -26,6 +31,14 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
   AnalysisPhase _phase = AnalysisPhase.generating;
   late AnimationController _transitionController;
   late AnalysisData _data;
+  late DateTime _screenStartTime;
+  DateTime? _resultShowTime;
+
+  // Face tracking for auto-return
+  final CameraService _cameraService = CameraService();
+  final FaceTrackerService _faceTracker = FaceTrackerService();
+  late final FaceDetector _mlkitDetector;
+  bool _isAutoReturning = false;
 
   // Animation values
   late Animation<double> _imageDissolve;
@@ -38,7 +51,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
   @override
   void initState() {
     super.initState();
+    _screenStartTime = DateTime.now();
     _data = widget.fallbackData ?? AnalysisData.defaultData;
+    _initAutoReturnTracking();
     
     _transitionController = AnimationController(
       vsync: this,
@@ -89,7 +104,10 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
     _transitionController.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
-        setState(() => _phase = AnalysisPhase.complete);
+        setState(() {
+          _phase = AnalysisPhase.complete;
+          _resultShowTime = DateTime.now();
+        });
       }
     });
 
@@ -119,18 +137,105 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
   }
 
-  void _startTransition() {
-    setState(() => _phase = AnalysisPhase.reveal);
-    _transitionController.forward();
+  Future<void> _initAutoReturnTracking() async {
+    await _cameraService.initialize();
+    _mlkitDetector = FaceDetector(
+      options: FaceDetectorOptions(
+        enableTracking: true,
+        performanceMode: FaceDetectorMode.fast,
+      ),
+    );
+    _startFaceTracking();
+  }
+
+  void _startFaceTracking() {
+    _cameraService.inCameraController?.startImageStream((CameraImage image) async {
+      if (_isAutoReturning || !mounted) return;
+
+      final inputImage = _inputImageFromCameraImage(image);
+      if (inputImage == null) return;
+
+      final faces = await _mlkitDetector.processImage(inputImage);
+      if (_isAutoReturning || !mounted) return;
+
+      List<FaceVector> currentFaceAngles = faces.map((face) {
+        final yaw = face.headEulerAngleY ?? 0.0;
+        final pitch = face.headEulerAngleX ?? 0.0;
+        return FaceVector(yaw, pitch);
+      }).toList();
+
+      final stableProgress = _faceTracker.getStableProgress(currentFaceAngles);
+      
+      // 結果が表示されてからの経過時間をチェック（まだ表示されていない場合は 0秒）
+      final elapsed = _resultShowTime != null 
+          ? DateTime.now().difference(_resultShowTime!).inSeconds 
+          : 0;
+
+      if (stableProgress > 1.0 && elapsed >= 5) {
+        _isAutoReturning = true;
+        _navigateToDashboard();
+      }
+    });
+  }
+
+  InputImage? _inputImageFromCameraImage(CameraImage image) {
+    if (_cameraService.inCameraController == null) return null;
+
+    final sensorOrientation = _cameraService.inCameraController!.description.sensorOrientation;
+    final rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
+    if (rotation == null) return null;
+
+    final format = InputImageFormatValue.fromRawValue(image.format.raw);
+    if (format == null) return null;
+
+    final Uint8List bytes = _concatenatePlanes(image.planes);
+
+    return InputImage.fromBytes(
+      bytes: bytes,
+      metadata: InputImageMetadata(
+        size: Size(image.width.toDouble(), image.height.toDouble()),
+        rotation: rotation,
+        format: format,
+        bytesPerRow: image.planes.first.bytesPerRow,
+      ),
+    );
+  }
+
+  Uint8List _concatenatePlanes(List<Plane> planes) {
+    final WriteBuffer allBytes = WriteBuffer();
+    for (final Plane plane in planes) {
+      allBytes.putUint8List(plane.bytes);
+    }
+    return allBytes.done().buffer.asUint8List();
   }
 
   @override
   void dispose() {
     _transitionController.dispose();
+    _cameraService.dispose();
+    _mlkitDetector.close();
     super.dispose();
   }
 
+  void _startTransition() {
+    setState(() => _phase = AnalysisPhase.reveal);
+    _transitionController.forward();
+  }
+
   void _navigateToDashboard() {
+    if (_isAutoReturning == false) {
+       _isAutoReturning = true;
+    }
+    
+    // Stop stream before popping
+    try {
+      if (_cameraService.inCameraController?.value.isStreamingImages ?? false) {
+        _cameraService.inCameraController?.stopImageStream();
+      }
+    } catch (e) {
+      debugPrint("Error stopping stream in AnalysisScreen: $e");
+    }
+
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         pageBuilder: (_, _, _) => const DashboardScreen(),
@@ -156,6 +261,18 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {
+        // 全体の経過時間（念のためのセーフガード）
+        final screenElapsed = DateTime.now().difference(_screenStartTime).inSeconds;
+        // 結果表示からの経過時間
+        final resultElapsed = _resultShowTime != null 
+            ? DateTime.now().difference(_resultShowTime!).inSeconds 
+            : 0;
+
+        if (screenElapsed >= 15 || resultElapsed >= 5) {
+          _navigateToDashboard();
+          return;
+        }
+
         if (_phase == AnalysisPhase.generating && widget.analysisFuture == null) {
           _startTransition();
         } else if (_phase == AnalysisPhase.complete) {
