@@ -251,7 +251,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
     double aspectRatio = 16 / 9;
     if (polygon != null && polygon.length >= 4) {
       double minX = 1000, minY = 1000, maxX = 0, maxY = 0;
-      for (int i = 0; i < polygon.length; i += 2) {
+      for (int i = 0; i < polygon.length - 1; i += 2) {
         final y = polygon[i];
         final x = polygon[i + 1];
         if (x < minX) minX = x;
@@ -552,7 +552,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
     // 境界矩形の計算 (Geminiの座標は 0~1000 の範囲 [y1, x1, y2, x2, ...])
     double minX = 1000, minY = 1000, maxX = 0, maxY = 0;
-    for (int i = 0; i < polygon.length; i += 2) {
+    for (int i = 0; i < polygon.length - 1; i += 2) {
       final y = polygon[i];
       final x = polygon[i + 1];
       if (x < minX) minX = x;
