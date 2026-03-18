@@ -3,13 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
-import '../camera/services/mediapipe_service.dart';
-import '../../core/theme/app_colors.dart';
-import '../camera/services/camera_service.dart';
-import '../camera/services/face_tracker_service.dart';
-import '../camera/models/face_vector.dart';
 import '../dashboard/dashboard_screen.dart';
 import 'analysis_model.dart';
+import '../../core/theme/app_colors.dart';
 import 'dart:async';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
@@ -36,13 +32,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
   late DateTime _screenStartTime;
   DateTime? _resultShowTime;
 
-  // Face tracking for auto-return
-  final CameraService _cameraService = CameraService();
-  final FaceTrackerService _faceTracker = FaceTrackerService();
-  final MediapipeService _mediapipeService = MediapipeService();
-  StreamSubscription? _faceSubscription;
-  bool _isAutoReturning = false;
-  bool _isAnalyzing = false;
+  // Result tracking
+  bool _isNavigatingBack = false;
 
   // Animation values
   late Animation<double> _imageDissolve;
@@ -57,7 +48,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
     super.initState();
     _screenStartTime = DateTime.now();
     _data = widget.fallbackData ?? AnalysisData.defaultData;
-    _initAutoReturnTracking();
     
     _transitionController = AnimationController(
       vsync: this,
@@ -135,65 +125,11 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
   }
 
-  Future<void> _initAutoReturnTracking() async {
-    await _cameraService.initialize();
-    await _mediapipeService.initialize();
-    _startFaceTracking();
-  }
-
-  void _startFaceTracking() {
-    _faceSubscription = _mediapipeService.faceStream.listen((data) {
-      if (_isAutoReturning || !mounted) return;
-
-      final rawLandmarks = data['landmarks'] as List?;
-      final landmarks = rawLandmarks?.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-
-      if (landmarks == null || landmarks.isEmpty) return;
-
-      // 478個のランドマークから Euler角 (Yaw/Pitch) を簡易推定
-      // DashboardScreen と同じロジック
-      final nose = landmarks[4];
-      final eyeLeft = landmarks[33];
-      final eyeRight = landmarks[263];
-      
-      final faceWidth = (eyeRight['x'] - eyeLeft['x']).abs();
-      if (faceWidth < 0.05) return;
-
-      final eyeCenterX = (eyeLeft['x'] + eyeRight['x']) / 2;
-      final yaw = (nose['x'] - eyeCenterX) / faceWidth * 30.0;
-      final eyeCenterY = (eyeLeft['y'] + eyeRight['y']) / 2;
-      final pitch = (nose['y'] - eyeCenterY) / faceWidth * 30.0;
-
-      final currentFaceVector = FaceVector(yaw, pitch);
-      final stableProgress = _faceTracker.getStableProgress([currentFaceVector]);
-      
-      final elapsed = _resultShowTime != null 
-          ? DateTime.now().difference(_resultShowTime!).inSeconds 
-          : 0;
-
-      if (stableProgress >= 0.8 && elapsed >= 5) {
-        _isAutoReturning = true;
-        _navigateToDashboard();
-      }
-    });
-
-    _cameraService.inCameraController?.startImageStream((CameraImage image) {
-      if (_isAutoReturning || _isAnalyzing || !mounted) return;
-      
-      _isAnalyzing = true;
-      final rotation = _cameraService.inCameraController?.description.sensorOrientation ?? 0;
-      _mediapipeService.detect(image, rotation: rotation).then((_) {
-        _isAnalyzing = false;
-      });
-    });
-  }
+  // Removed _initAutoReturnTracking and _startFaceTracking functionality
 
   @override
   void dispose() {
-    _faceSubscription?.cancel();
     _transitionController.dispose();
-    _cameraService.dispose();
-    _mediapipeService.close();
     super.dispose();
   }
 
@@ -202,22 +138,13 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
     _transitionController.forward();
   }
 
-  void _navigateToDashboard({dynamic result}) {
-    if (_isAutoReturning == false) {
-       _isAutoReturning = true;
-    }
-    
-    // Stop stream before popping
-    try {
-      if (_cameraService.inCameraController?.value.isStreamingImages ?? false) {
-        _cameraService.inCameraController?.stopImageStream();
-      }
-    } catch (e) {
-      debugPrint("Error stopping stream in AnalysisScreen: $e");
-    }
+  Future<void> _navigateToDashboard({dynamic result}) async {
+    if (_isNavigatingBack) return;
+    _isNavigatingBack = true;
 
-    // pushReplacement ではなく pop を使って結果を返す
-    Navigator.of(context).pop(result);
+    if (mounted) {
+      Navigator.of(context).pop(result);
+    }
   }
 
 
