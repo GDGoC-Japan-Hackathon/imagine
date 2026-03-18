@@ -11,15 +11,17 @@ class GeminiAnalysisResult {
 }
 
 class GeminiService {
-  late final GenerativeModel _model;
+  GenerativeModel? _model;
   // 最新安定版の Flash モデル 'gemini-2.5-flash' を指定
   final String modelName = 'gemini-2.5-flash'; 
 
   void initialize(String apiKey) {
-    _model = GenerativeModel(
-      model: modelName,
-      apiKey: apiKey,
-    );
+    if (_model == null) {
+      _model = GenerativeModel(
+        model: modelName,
+        apiKey: apiKey,
+      );
+    }
   }
 
   Future<Map<String, String>> analyzeImageAtLocation(File imageFile, double pan, double tilt) async {
@@ -52,7 +54,7 @@ $locationDesc
     final bytes = await imageFile.readAsBytes();
     final content = [Content.multi([TextPart(prompt), DataPart('image/jpeg', bytes)])];
 
-    final response = await _model.generateContent(
+    final response = await _model!.generateContent(
       content,
       generationConfig: GenerationConfig(responseMimeType: "application/json"),
     );
@@ -84,7 +86,7 @@ Return ONLY valid JSON array. No markdown.
     final bytes = await imageFile.readAsBytes();
     final content = [Content.multi([TextPart(prompt), DataPart('image/jpeg', bytes)])];
 
-    final response = await _model.generateContent(
+    final response = await _model!.generateContent(
       content,
       generationConfig: GenerationConfig(responseMimeType: "application/json"),
     );
