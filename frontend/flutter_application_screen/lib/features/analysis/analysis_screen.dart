@@ -2,14 +2,15 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:camera/camera.dart';
-import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:flutter/foundation.dart';
+import '../camera/services/mediapipe_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../camera/services/camera_service.dart';
 import '../camera/services/face_tracker_service.dart';
 import '../camera/models/face_vector.dart';
 import '../dashboard/dashboard_screen.dart';
 import 'analysis_model.dart';
+import 'dart:async';
 
 enum AnalysisPhase { generating, peakPulse, convergence, reveal, complete }
 
@@ -37,8 +38,10 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
   // Face tracking for auto-return
   final CameraService _cameraService = CameraService();
   final FaceTrackerService _faceTracker = FaceTrackerService();
-  late final FaceDetector _mlkitDetector;
+  final MediapipeService _mediapipeService = MediapipeService();
+  StreamSubscription? _faceSubscription;
   bool _isAutoReturning = false;
+  bool _isAnalyzing = false;
 
   // Animation values
   late Animation<double> _imageDissolve;
@@ -139,81 +142,63 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
   Future<void> _initAutoReturnTracking() async {
     await _cameraService.initialize();
-    _mlkitDetector = FaceDetector(
-      options: FaceDetectorOptions(
-        enableTracking: true,
-        performanceMode: FaceDetectorMode.fast,
-      ),
-    );
+    await _mediapipeService.initialize();
     _startFaceTracking();
   }
 
   void _startFaceTracking() {
-    _cameraService.inCameraController?.startImageStream((CameraImage image) async {
+    _faceSubscription = _mediapipeService.faceStream.listen((data) {
       if (_isAutoReturning || !mounted) return;
 
-      final inputImage = _inputImageFromCameraImage(image);
-      if (inputImage == null) return;
+      final rawLandmarks = data['landmarks'] as List?;
+      final landmarks = rawLandmarks?.map((e) => Map<String, dynamic>.from(e as Map)).toList();
 
-      final faces = await _mlkitDetector.processImage(inputImage);
-      if (_isAutoReturning || !mounted) return;
+      if (landmarks == null || landmarks.isEmpty) return;
 
-      List<FaceVector> currentFaceAngles = faces.map((face) {
-        final yaw = face.headEulerAngleY ?? 0.0;
-        final pitch = face.headEulerAngleX ?? 0.0;
-        return FaceVector(yaw, pitch);
-      }).toList();
-
-      final stableProgress = _faceTracker.getStableProgress(currentFaceAngles);
+      // 478個のランドマークから Euler角 (Yaw/Pitch) を簡易推定
+      // DashboardScreen と同じロジック
+      final nose = landmarks[4];
+      final eyeLeft = landmarks[33];
+      final eyeRight = landmarks[263];
       
-      // 結果が表示されてからの経過時間をチェック（まだ表示されていない場合は 0秒）
+      final faceWidth = (eyeRight['x'] - eyeLeft['x']).abs();
+      if (faceWidth < 0.05) return;
+
+      final eyeCenterX = (eyeLeft['x'] + eyeRight['x']) / 2;
+      final yaw = (nose['x'] - eyeCenterX) / faceWidth * 30.0;
+      final eyeCenterY = (eyeLeft['y'] + eyeRight['y']) / 2;
+      final pitch = (nose['y'] - eyeCenterY) / faceWidth * 30.0;
+
+      final currentFaceVector = FaceVector(yaw, pitch);
+      final stableProgress = _faceTracker.getStableProgress([currentFaceVector]);
+      
       final elapsed = _resultShowTime != null 
           ? DateTime.now().difference(_resultShowTime!).inSeconds 
           : 0;
 
-      if (stableProgress > 1.0 && elapsed >= 5) {
+      if (stableProgress >= 0.8 && elapsed >= 5) {
         _isAutoReturning = true;
         _navigateToDashboard();
       }
     });
-  }
 
-  InputImage? _inputImageFromCameraImage(CameraImage image) {
-    if (_cameraService.inCameraController == null) return null;
-
-    final sensorOrientation = _cameraService.inCameraController!.description.sensorOrientation;
-    final rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
-    if (rotation == null) return null;
-
-    final format = InputImageFormatValue.fromRawValue(image.format.raw);
-    if (format == null) return null;
-
-    final Uint8List bytes = _concatenatePlanes(image.planes);
-
-    return InputImage.fromBytes(
-      bytes: bytes,
-      metadata: InputImageMetadata(
-        size: Size(image.width.toDouble(), image.height.toDouble()),
-        rotation: rotation,
-        format: format,
-        bytesPerRow: image.planes.first.bytesPerRow,
-      ),
-    );
-  }
-
-  Uint8List _concatenatePlanes(List<Plane> planes) {
-    final WriteBuffer allBytes = WriteBuffer();
-    for (final Plane plane in planes) {
-      allBytes.putUint8List(plane.bytes);
-    }
-    return allBytes.done().buffer.asUint8List();
+    _cameraService.inCameraController?.startImageStream((CameraImage image) {
+      if (_isAutoReturning || _isAnalyzing || !mounted) return;
+      
+      _isAnalyzing = true;
+      final rotation = _cameraService.inCameraController?.description.sensorOrientation ?? 0;
+      _mediapipeService.detect(image, rotation: rotation).then((_) {
+        _isAnalyzing = false;
+      });
+    });
   }
 
   @override
   void dispose() {
+    _faceSubscription?.cancel();
     _transitionController.dispose();
     _cameraService.dispose();
-    _mlkitDetector.close();
+    _mediapipeService.close();
     super.dispose();
   }
 

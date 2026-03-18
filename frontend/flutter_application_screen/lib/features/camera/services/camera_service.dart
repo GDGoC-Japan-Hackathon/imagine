@@ -13,7 +13,7 @@ class CameraService {
       (c) => c.lensDirection == CameraLensDirection.front,
       orElse: () => _cameras.first,
     );
-    inCameraController = CameraController(frontCamera, ResolutionPreset.medium);
+    inCameraController = CameraController(frontCamera, ResolutionPreset.medium); // 精度向上のため medium に変更
     await inCameraController?.initialize();
 
     // OutCamera (アウトカメラ: 撮影用)

@@ -10,18 +10,33 @@ class _FaceSample {
 }
 
 class FaceTrackerService {
-  static const int trackingWindowMs = 2000; // 2秒間のウィンドウ
-  static const double stabilityThreshold = 0.1; // 10%以上のフレームが安定していればOK
+  static const int trackingWindowMs = 800; // 判定時間を0.8秒にさらに短縮
+  static const double stabilityThreshold = 0.25; // 25%以上の安定フレームで続行
+  static const double smoothingAlpha = 0.25; // 滑らかさとレスポンスのバランス
 
-  final Map<int, FaceVector> _baseFaceVectors = {}; // ウィンドウ開始時の基準点
+  final Map<int, FaceVector> _baseFaceVectors = {};
+  final Map<int, FaceVector> _smoothedFaceVectors = {};
   final Map<int, List<_FaceSample>> _faceHistory = {};
 
-  // 顔の向きが基準から「大きく」外れていないか判定
-  bool _isGazeStableFromBase(FaceVector current, FaceVector base, {double angleThreshold = 25.0}) {
+  FaceVector _smooth(int id, FaceVector raw) {
+    final prev = _smoothedFaceVectors[id];
+    if (prev == null) {
+      _smoothedFaceVectors[id] = raw;
+      return raw;
+    }
+    final smoothed = FaceVector(
+      prev.x * (1 - smoothingAlpha) + raw.x * smoothingAlpha,
+      prev.y * (1 - smoothingAlpha) + raw.y * smoothingAlpha,
+    );
+    _smoothedFaceVectors[id] = smoothed;
+    return smoothed;
+  }
+
+  bool _isGazeStableFromBase(FaceVector current, FaceVector base, {double angleThreshold = 35.0}) {
     final dx = current.x - base.x;
     final dy = current.y - base.y;
-    final movement = dx * dx + dy * dy;
-    return movement < (angleThreshold * angleThreshold); // 25度の範囲内ならOK
+    final distance = math.sqrt(dx * dx + dy * dy);
+    return distance < angleThreshold; // 35度の広い範囲で注視を許容
   }
 
   /// 現在の安定度合いを 0.0 ~ 1.0 で返す
@@ -30,6 +45,7 @@ class FaceTrackerService {
 
     // フレームから消えた顔のデータを削除
     _baseFaceVectors.removeWhere((key, _) => key >= anglesList.length);
+    _smoothedFaceVectors.removeWhere((key, _) => key >= anglesList.length);
     _faceHistory.removeWhere((key, _) => key >= anglesList.length);
 
     if (anglesList.isEmpty) {
@@ -38,14 +54,16 @@ class FaceTrackerService {
     }
 
     for (int i = 0; i < anglesList.length; i++) {
-      final currentAngles = anglesList[i];
+      // 1. まず入力をスムージング（手振れ補正）
+      final smoothedAngles = _smooth(i, anglesList[i]);
       
       if (_baseFaceVectors[i] == null) {
-        _baseFaceVectors[i] = currentAngles;
+        _baseFaceVectors[i] = smoothedAngles;
         _faceHistory[i] = [];
       }
 
-      final isStable = _isGazeStableFromBase(currentAngles, _baseFaceVectors[i]!);
+      // 2. スムージングされた値で安定判定
+      final isStable = _isGazeStableFromBase(smoothedAngles, _baseFaceVectors[i]!);
 
       _faceHistory[i]!.add(_FaceSample(now, isStable));
       _faceHistory[i]!.removeWhere((sample) => now - sample.timestamp > trackingWindowMs);
@@ -54,10 +72,9 @@ class FaceTrackerService {
       final stableCount = history.where((s) => s.isGazeStable).length;
       final stabilityRatio = stableCount / history.length;
       
-      // 安定性が著しく低い場合のみリセット
-      // ただし、進捗が戻るのを防ぐため、リセット時は進捗計算用のリストもクリアされる
+      // 安定性が50%を切った場合、大きく動いたとみなしてリセット
       if (stabilityRatio < stabilityThreshold && history.length > 5) {
-        _baseFaceVectors[i] = currentAngles;
+        _baseFaceVectors[i] = smoothedAngles;
         _faceHistory[i] = [];
       }
     }
@@ -70,12 +87,11 @@ class FaceTrackerService {
       final startTime = history.first.timestamp;
       final elapsed = now - startTime;
       
-      // trackingWindowMs(2000ms) に対しての経過時間を 0.0 ~ 1.0 で返す
-      // これにより、履歴が古くなることによる「逆戻り」を防ぎ、2秒経てば必ず1.0になる
+      // 時間経過による進捗をシンプルに計算 (1.0秒で100%に到達)
       final progress = (elapsed / trackingWindowMs).clamp(0.0, 1.0);
       maxProgress = math.max(maxProgress, progress);
     }
 
-    return maxProgress;
+    return maxProgress > 0.95 ? 1.0 : maxProgress;
   }
 }

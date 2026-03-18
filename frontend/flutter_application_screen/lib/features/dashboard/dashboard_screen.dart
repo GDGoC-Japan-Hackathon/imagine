@@ -1,7 +1,6 @@
+import 'dart:async';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:camera/camera.dart';
-import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'dart:math' as math;
 
@@ -14,6 +13,7 @@ import '../camera/models/face_vector.dart';
 import '../camera/services/camera_service.dart';
 import '../camera/services/face_tracker_service.dart';
 import '../camera/services/gemini_service.dart';
+import '../camera/services/mediapipe_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -28,13 +28,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final CameraService _cameraService = CameraService();
   final FaceTrackerService _faceTracker = FaceTrackerService();
   final GeminiService _geminiService = GeminiService();
-  late final FaceDetector _mlkitDetector;
+  final MediapipeService _mediapipeService = MediapipeService();
+  
+  StreamSubscription? _faceSubscription;
 
   bool _isProcessing = false;
   bool _skipFaceDetection = false;
   String _statusMessage = "初期化しています...";
   
-  // ユーザーガイド用
+  // ユーザーガイド・解析用
+  bool _isAnalyzing = false;
+  DateTime _lastAnalysisTime = DateTime.now();
   DateTime _lastFaceDetectedTime = DateTime.now();
   bool _hasFaceInFrame = false;
   Rect? _detectedFaceRect;
@@ -47,16 +51,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _initApp() async {
     await _cameraService.initialize();
-    
-    // Google ML Kit FaceDetectorの初期化 (Euler角取得のため classification 有効)
-    _mlkitDetector = FaceDetector(
-      options: FaceDetectorOptions(
-        enableClassification: true,
-        enableTracking: true,
-        performanceMode: FaceDetectorMode.fast,
-      ),
-    );
-    
+    await _mediapipeService.initialize();
+
     // APIキーの読み込み (.env ファイルから取得)
     _geminiService.initialize(dotenv.env['GEMINI_API_KEY'] ?? ''); 
     _skipFaceDetection = dotenv.env['SKIP_FACE_DETECTION']?.toLowerCase() == 'true';
@@ -99,125 +95,128 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (_cameraService.inCameraController == null) return;
     if (_cameraService.inCameraController!.value.isStreamingImages) return;
 
-    _cameraService.inCameraController?.startImageStream((CameraImage image) async {
-      if (_isProcessing) return;
-
-      // CameraImage から InputImage への変換
-      final inputImage = _inputImageFromCameraImage(image);
-      if (inputImage == null) return;
-
-      final faces = await _mlkitDetector.processImage(inputImage);
+    // MediaPipe からのストリームを購読
+    _faceSubscription = _mediapipeService.faceStream.listen((data) {
       if (_isProcessing || !mounted) return;
-      
-      if (faces.isEmpty) {
-        // 500msの猶予（グレイスピリオド）を設けて、一瞬の検出失敗によるチラつきを防ぐ
+
+      // ネストされた Map の型を安全にキャスト
+      final rawLandmarks = data['landmarks'] as List?;
+      final landmarks = rawLandmarks?.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+
+      if (landmarks == null || landmarks.isEmpty) {
+        // 顔ロスト時の猶予処理
         final now = DateTime.now();
-        if (_hasFaceInFrame && now.difference(_lastFaceDetectedTime).inMilliseconds > 500) {
+        if (_hasFaceInFrame && now.difference(_lastFaceDetectedTime).inMilliseconds > 1000) {
           if (mounted) {
             setState(() {
               _hasFaceInFrame = false;
               _detectedFaceRect = null;
             });
             _orbKey.currentState?.setTracking(false);
+            _orbKey.currentState?.setFaceOffset(null);
           }
         }
-      } else {
-        _lastFaceDetectedTime = DateTime.now();
-        if (mounted) {
-          if (!_hasFaceInFrame) {
-            setState(() => _hasFaceInFrame = true);
-            _orbKey.currentState?.setTracking(true);
-          }
-          final face = faces.first;
-          _detectedFaceRect = face.boundingBox;
-        }
+        return;
       }
 
-      List<FaceVector> currentFaceAngles = faces.map((face) {
-        // Euler角を直接返してくれる (度単位)
-        // headEulerAngleY: 左右の向き (Yaw相当)
-        // headEulerAngleX: 上下の向き (Pitch相当)
-        final yaw = face.headEulerAngleY ?? 0.0;
-        final pitch = face.headEulerAngleX ?? 0.0;
+      // 顔を検出
+      _lastFaceDetectedTime = DateTime.now();
+      if (!_hasFaceInFrame) {
+        setState(() => _hasFaceInFrame = true);
+        _orbKey.currentState?.setTracking(true);
+      }
 
-        return FaceVector(yaw, pitch);
-      }).toList();
-
-      final stableProgress = _faceTracker.getStableProgress(currentFaceAngles);
+      // 478個のランドマークから Euler角 (Yaw/Pitch) を簡易推定
+      // Point 4: Nose Tip, Point 152: Chin, Point 33: Left Eye, Point 263: Right Eye
+      final nose = landmarks[4];
+      final eyeLeft = landmarks[33];
+      final eyeRight = landmarks[263];
       
-      if (currentFaceAngles.isNotEmpty) {
-        final mainFace = currentFaceAngles.first;
-        // 向きをOrbに伝える (Yawは左右、Pitchは上下。ML Kitの値を適度にスケーリング)
-        _orbKey.currentState?.setFaceOffset(Offset(mainFace.x / 40, mainFace.y / 40));
-      } else {
-        _orbKey.currentState?.setFaceOffset(null);
+      // 顔の幅を基準に水平位置を正規化
+      final faceWidth = (eyeRight['x'] - eyeLeft['x']).abs();
+      if (faceWidth < 0.05) return; // 小さすぎる（遠すぎる）場合はスキップ
+
+      final eyeCenterX = (eyeLeft['x'] + eyeRight['x']) / 2;
+      final yaw = (nose['x'] - eyeCenterX) / faceWidth * 30.0; // 顔の幅で割って正規化
+
+      // 垂直方向も同様。目の高さと鼻の距離
+      final eyeCenterY = (eyeLeft['y'] + eyeRight['y']) / 2;
+      final pitch = (nose['y'] - eyeCenterY) / faceWidth * 30.0;
+
+      final currentFaceVector = FaceVector(yaw, pitch);
+      final stableProgress = _faceTracker.getStableProgress([currentFaceVector]);
+
+      // Orbの状態更新
+      final faceOffset = Offset(
+        (yaw / 25.0).clamp(-1.0, 1.0),
+        (pitch / 20.0).clamp(-1.0, 1.0)
+      );
+      _orbKey.currentState?.setFaceOffset(faceOffset);
+
+      // 表情の反映
+      final rawBlendshapes = data['blendshapes'] as List?;
+      if (rawBlendshapes != null) {
+        final blendshapes = rawBlendshapes.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        final scores = { for (var e in blendshapes) e['category'] as String : (e['score'] as num).toDouble() };
+        _orbKey.currentState?.setBlendshapes(scores);
       }
 
-      if (stableProgress >= 1) {
+      if (stableProgress >= 0.8) {
         _isProcessing = true;
         _orbKey.currentState?.setStable(true);
         
         setState(() {
-           _statusMessage = "目線が固定されました。撮影・解析を開始します...";
+          _statusMessage = "目線が固定されました。撮影・解析を開始します...";
         });
 
-        // 1. まずインカメラのストリームを止める
-        try {
-          if (_cameraService.inCameraController?.value.isStreamingImages ?? false) {
-            await _cameraService.inCameraController?.stopImageStream();
-          }
-        } catch (e) {
-          debugPrint("Error stopping image stream: $e");
-        }
-        
-        // 2. アウトカメラで撮影
-        final targetAngles = currentFaceAngles.first;
-        final capturedImage = await _cameraService.captureOutCameraImage();
-        
-        if (mounted) {
-          _navigateToGeneratingAndAnalyze(targetAngles, capturedImage: capturedImage);
-        }
+        // 撮影と遷移
+        _captureAndHandleTransition(currentFaceVector);
       } else if (stableProgress > 0) {
         setState(() {
-          final percent = (stableProgress * 100).toInt();
+          // 表示上は 80% を上限とするため、現在の進捗を 0.8 で正規化して表示
+          final percent = (stableProgress / 0.8 * 100).clamp(0, 100).toInt();
           _statusMessage = "視点を固定中... $percent%";
         });
       }
     });
+
+    // カメラストリームの開始と MediaPipe への送信
+    _cameraService.inCameraController?.startImageStream((CameraImage image) {
+      if (_isProcessing || _isAnalyzing) return;
+      
+      final now = DateTime.now();
+      // CPU負荷軽減のため、100ms (秒間最大10回相当) は間隔を空ける
+      if (now.difference(_lastAnalysisTime).inMilliseconds < 100) return;
+
+      _isAnalyzing = true;
+      _lastAnalysisTime = now;
+
+      // MediaPipe (Native) へ送信
+      final rotation = _cameraService.inCameraController?.description.sensorOrientation ?? 0;
+      _mediapipeService.detect(image, rotation: rotation).then((_) {
+        _isAnalyzing = false;
+      });
+    });
   }
 
-  InputImage? _inputImageFromCameraImage(CameraImage image) {
-    if (_cameraService.inCameraController == null) return null;
-
-    final sensorOrientation = _cameraService.inCameraController!.description.sensorOrientation;
-    final rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
-    if (rotation == null) return null;
-
-    final format = InputImageFormatValue.fromRawValue(image.format.raw);
-    if (format == null) return null;
-
-    // Google ML Kit for Android expects NV21 format when using fromBytes
-    // We need to concatenate the YUV planes correctly.
-    final Uint8List bytes = _concatenatePlanes(image.planes);
-
-    return InputImage.fromBytes(
-      bytes: bytes,
-      metadata: InputImageMetadata(
-        size: Size(image.width.toDouble(), image.height.toDouble()),
-        rotation: rotation,
-        format: format,
-        bytesPerRow: image.planes.first.bytesPerRow,
-      ),
-    );
-  }
-
-  Uint8List _concatenatePlanes(List<Plane> planes) {
-    final WriteBuffer allBytes = WriteBuffer();
-    for (final Plane plane in planes) {
-      allBytes.putUint8List(plane.bytes);
+  Future<void> _captureAndHandleTransition(FaceVector targetVector) async {
+    // 1. まずインカメラのストリームを止める
+    try {
+      if (_cameraService.inCameraController?.value.isStreamingImages ?? false) {
+        await _cameraService.inCameraController?.stopImageStream();
+      }
+    } catch (e) {
+      debugPrint("Error stopping image stream: $e");
     }
-    return allBytes.done().buffer.asUint8List();
+    
+    // 2. アウトカメラで撮影
+    final capturedImage = await _cameraService.captureOutCameraImage();
+    
+    if (mounted) {
+      _navigateToGeneratingAndAnalyze(targetVector, capturedImage: capturedImage);
+    }
   }
+
 
   void _navigateToGeneratingAndAnalyze(FaceVector targetVector, {XFile? capturedImage}) {
     final analysisFuture = _captureAndAnalyze(targetVector, preCapturedImage: capturedImage);
@@ -267,8 +266,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
+    _faceSubscription?.cancel();
+    _mediapipeService.close();
     _cameraService.dispose();
-    _mlkitDetector.close();
     super.dispose();
   }
 
