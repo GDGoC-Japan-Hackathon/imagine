@@ -10,9 +10,10 @@ class _FaceSample {
 }
 
 class FaceTrackerService {
-  static const int trackingWindowMs = 800; // 判定時間を0.8秒にさらに短縮
-  static const double stabilityThreshold = 0.25; // 25%以上の安定フレームで続行
-  static const double smoothingAlpha = 0.25; // 滑らかさとレスポンスのバランス
+  static const int trackingWindowMs = 800; // 車内環境を想定し、判定時間を0.8秒へ短縮
+  static const double stabilityThreshold = 0.05; // 振動によるフレーム損失を許容 (5%以上の安定フレームでOK)
+  static const double smoothingAlpha = 0.10; // さらにスムージングを強くして車体の微振動をカット
+  static const double driftFollowAlpha = 0.15; // 基準点を車の揺れや姿勢変化に素早く追従させる
 
   final Map<int, FaceVector> _baseFaceVectors = {};
   final Map<int, FaceVector> _smoothedFaceVectors = {};
@@ -32,11 +33,11 @@ class FaceTrackerService {
     return smoothed;
   }
 
-  bool _isGazeStableFromBase(FaceVector current, FaceVector base, {double angleThreshold = 35.0}) {
+  bool _isGazeStableFromBase(FaceVector current, FaceVector base, {double angleThreshold = 45.0}) {
     final dx = current.x - base.x;
     final dy = current.y - base.y;
     final distance = math.sqrt(dx * dx + dy * dy);
-    return distance < angleThreshold; // 35度の広い範囲で注視を許容
+    return distance < angleThreshold; // ドライブレコーダー用に閾値を45.0へ緩和し、大きな振動も許容
   }
 
   /// 現在の安定度合いを 0.0 ~ 1.0 で返す
@@ -65,6 +66,15 @@ class FaceTrackerService {
       // 2. スムージングされた値で安定判定
       final isStable = _isGazeStableFromBase(smoothedAngles, _baseFaceVectors[i]!);
 
+      // 3. 基準点を現在の値に極低速で追従させる (Drift Compensation)
+      // これにより、ゆっくりとした姿勢の変化を「動き」とみなさず安定として継続できる
+      if (isStable) {
+        _baseFaceVectors[i] = FaceVector(
+          _baseFaceVectors[i]!.x * (1 - driftFollowAlpha) + smoothedAngles.x * driftFollowAlpha,
+          _baseFaceVectors[i]!.y * (1 - driftFollowAlpha) + smoothedAngles.y * driftFollowAlpha,
+        );
+      }
+
       _faceHistory[i]!.add(_FaceSample(now, isStable));
       _faceHistory[i]!.removeWhere((sample) => now - sample.timestamp > trackingWindowMs);
       
@@ -72,8 +82,8 @@ class FaceTrackerService {
       final stableCount = history.where((s) => s.isGazeStable).length;
       final stabilityRatio = stableCount / history.length;
       
-      // 安定性が50%を切った場合、大きく動いたとみなしてリセット
-      if (stabilityRatio < stabilityThreshold && history.length > 5) {
+      // 安定性が著しく低い場合のみリセット
+      if (stabilityRatio < stabilityThreshold && history.length > 10) {
         _baseFaceVectors[i] = smoothedAngles;
         _faceHistory[i] = [];
       }
