@@ -32,6 +32,12 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
   // Interactive Pull variables
   Offset _currentPullOffset = Offset.zero;
 
+  // MediaPipe Blendshapes
+  double _smileScore = 0.0;
+  double _leftBlinkScore = 0.0;
+  double _rightBlinkScore = 0.0;
+  double _squintScore = 0.0;
+
   @override
   void initState() {
     super.initState();
@@ -93,12 +99,42 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
       _isStable = stable;
       if (stable) {
         _isBlinking = false;
-        _breathingController.duration = const Duration(milliseconds: 1000);
+        // 安定時は高速で強烈なパルス
+        _breathingController.duration = const Duration(milliseconds: 600);
         _breathingController.repeat(reverse: true);
       } else {
-        _breathingController.duration = const Duration(seconds: 4);
+        // 通常時、またはトラッキング中のみの場合は元の速度へ
+        _breathingController.duration = _isTracking ? const Duration(seconds: 2) : const Duration(seconds: 4);
         _breathingController.repeat(reverse: true);
       }
+    });
+  }
+
+  void setTracking(bool tracking) {
+    if (_isTracking == tracking) return;
+    setState(() {
+      _isTracking = tracking;
+      if (tracking) {
+        _breathingController.duration = const Duration(seconds: 2);
+      } else {
+        _breathingController.duration = const Duration(seconds: 4);
+        _smileScore = 0;
+        _leftBlinkScore = 0;
+        _rightBlinkScore = 0;
+        _squintScore = 0;
+      }
+      _breathingController.repeat(reverse: true);
+    });
+  }
+
+  void setBlendshapes(Map<String, double> scores) {
+    if (!mounted) return;
+    setState(() {
+      // MediaPipe Blendshape categories
+      _smileScore = (scores['mouthSmileLeft'] ?? 0) + (scores['mouthSmileRight'] ?? 0) / 2;
+      _leftBlinkScore = scores['eyeBlinkLeft'] ?? 0;
+      _rightBlinkScore = scores['eyeBlinkRight'] ?? 0;
+      _squintScore = (scores['eyeSquintLeft'] ?? 0) + (scores['eyeSquintRight'] ?? 0) / 2;
     });
   }
 
@@ -219,17 +255,21 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
             height: widget.size,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: _isStable ? const Color(0xFFE2F063) : AppColors.orbBackground,
+              color: _isStable 
+                ? const Color(0xFFE2F063) 
+                : (_isTracking ? const Color(0xFFD4E157) : AppColors.orbBackground),
               boxShadow: [
                 // Inner glow (Breathing)
                 BoxShadow(
-                  color: (_isStable ? Colors.white : AppColors.orbGlowYellow).withValues(alpha: 0.5 + (_breathingAnimation.value * 0.3)),
-                  blurRadius: (_isStable ? 40 : 30) + (_breathingAnimation.value * 15),
-                  spreadRadius: (_isStable ? 15 : 10) + (_breathingAnimation.value * 8),
+                  color: (_isStable ? Colors.white : (_isTracking ? const Color(0xFFE2F063) : AppColors.orbGlowYellow))
+                      .withValues(alpha: 0.5 + (_breathingAnimation.value * 0.3)),
+                  blurRadius: (_isStable ? 45 : (_isTracking ? 35 : 30)) + (_breathingAnimation.value * 15),
+                  spreadRadius: (_isStable ? 18 : (_isTracking ? 12 : 10)) + (_breathingAnimation.value * 8),
                 ),
                 // Outer glow (Breathing)
                 BoxShadow(
-                  color: AppColors.orbGlowOuter.withValues(alpha: 0.3 + (_breathingAnimation.value * 0.2)),
+                  color: (_isTracking ? const Color(0xFFBCCB3D).withValues(alpha: 0.4) : AppColors.orbGlowOuter.withValues(alpha: 0.3))
+                      .withValues(alpha: 0.3 + (_breathingAnimation.value * 0.2)),
                   blurRadius: 60 + (_breathingAnimation.value * 20),
                   spreadRadius: 20 + (_breathingAnimation.value * 10),
                 ),
@@ -259,9 +299,9 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      _buildEye(),
+                      _buildEye(isLeft: true),
                       SizedBox(width: widget.size * (_isStable ? 0.2 : 0.15)),
-                      _buildEye(),
+                      _buildEye(isLeft: false),
                     ],
                   ),
                 ),
@@ -286,22 +326,31 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildEye() {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 100),
-      width: _isStable ? widget.size * 0.08 : widget.size * 0.06,
-      height: _isBlinking ? 0.0 : (_isStable ? 2.0 : widget.size * 0.06),
-      decoration: BoxDecoration(
-        color: _isStable ? Colors.black : Colors.white,
-        shape: _isStable ? BoxShape.rectangle : BoxShape.circle,
-        borderRadius: _isStable ? BorderRadius.circular(1) : null,
-        boxShadow: [
-          BoxShadow(
-            color: _isStable ? Colors.black26 : Colors.white54,
-            blurRadius: 5,
-            spreadRadius: 2,
-          ),
-        ],
+  Widget _buildEye({required bool isLeft}) {
+    final blinkScore = isLeft ? _leftBlinkScore : _rightBlinkScore;
+    
+    final eyeWidth = _isStable 
+        ? widget.size * 0.12 
+        : (_isTracking ? (widget.size * (0.08 + _smileScore * 0.02)) : widget.size * 0.06);
+    
+
+    return Flexible(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 50),
+        width: eyeWidth,
+        height: eyeHeight,
+        decoration: BoxDecoration(
+          color: _isStable ? Colors.black : Colors.white,
+          borderRadius: BorderRadius.circular(_isStable ? 1 : widget.size),
+          shape: BoxShape.rectangle,
+          boxShadow: [
+            BoxShadow(
+              color: _isStable ? Colors.black26 : Colors.white54,
+              blurRadius: 5,
+              spreadRadius: 2,
+            ),
+          ],
+        ),
       ),
     );
   }
