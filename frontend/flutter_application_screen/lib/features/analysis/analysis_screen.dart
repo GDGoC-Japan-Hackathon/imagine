@@ -11,6 +11,7 @@ import '../camera/models/face_vector.dart';
 import '../dashboard/dashboard_screen.dart';
 import 'analysis_model.dart';
 import 'dart:async';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 enum AnalysisPhase { generating, peakPulse, convergence, reveal, complete }
 
@@ -124,16 +125,10 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
         }
       }).catchError((e) {
         if (mounted) {
-          setState(() {
-            _data = AnalysisData(
-              tag: "ERROR",
-              title: "Analysis Failed",
-              subtitle: "Oops, something went wrong.",
-              description: e.toString(),
-              imagePath: _data.imagePath,
-            );
-          });
-          _startTransition();
+          final isDebug = dotenv.env['DEBUG_MODE']?.toLowerCase() == 'true';
+          final errorMsg = isDebug ? 'error:$e' : 'error:解析に失敗しました。しばらく待ってからやり直してください。';
+          // エラー時はメッセージを添えてダッシュボードに戻る
+          _navigateToDashboard(result: errorMsg);
         }
       });
     }
@@ -207,7 +202,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
     _transitionController.forward();
   }
 
-  void _navigateToDashboard() {
+  void _navigateToDashboard({dynamic result}) {
     if (_isAutoReturning == false) {
        _isAutoReturning = true;
     }
@@ -221,23 +216,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
       debugPrint("Error stopping stream in AnalysisScreen: $e");
     }
 
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder(
-        pageBuilder: (_, _, _) => const DashboardScreen(),
-        transitionDuration: const Duration(milliseconds: 700),
-        reverseTransitionDuration: const Duration(milliseconds: 400),
-        transitionsBuilder: (_, animation, _, child) {
-          final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
-          return FadeTransition(
-            opacity: curved,
-            child: ScaleTransition(
-              scale: Tween<double>(begin: 0.92, end: 1.0).animate(curved),
-              child: child,
-            ),
-          );
-        },
-      ),
-    );
+    // pushReplacement ではなく pop を使って結果を返す
+    Navigator.of(context).pop(result);
   }
 
 
