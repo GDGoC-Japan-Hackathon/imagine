@@ -10,6 +10,10 @@ class _FaceSample {
 }
 
 class FaceTrackerService {
+  static final FaceTrackerService _instance = FaceTrackerService._internal();
+  factory FaceTrackerService() => _instance;
+  FaceTrackerService._internal();
+
   static const int trackingWindowMs = 800; // 車内環境を想定し、判定時間を0.8秒へ短縮
   static const double stabilityThreshold = 0.05; // 振動によるフレーム損失を許容 (5%以上の安定フレームでOK)
   static const double smoothingAlpha = 0.10; // さらにスムージングを強くして車体の微振動をカット
@@ -103,5 +107,11 @@ class FaceTrackerService {
     }
 
     return maxProgress > 0.95 ? 1.0 : maxProgress;
+  }
+
+  void reset() {
+    _baseFaceVectors.clear();
+    _smoothedFaceVectors.clear();
+    _faceHistory.clear();
   }
 }

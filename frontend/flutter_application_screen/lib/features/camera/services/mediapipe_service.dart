@@ -3,6 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
 
 class MediapipeService {
+  static final MediapipeService _instance = MediapipeService._internal();
+  factory MediapipeService() => _instance;
+  MediapipeService._internal();
+
   static const _methodChannel = MethodChannel('com.example.imagine/mediapipe');
   static const _eventChannel = EventChannel('com.example.imagine/mediapipe_events');
 

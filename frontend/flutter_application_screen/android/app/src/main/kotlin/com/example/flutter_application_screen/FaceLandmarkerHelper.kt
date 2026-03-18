@@ -46,23 +46,26 @@ class FaceLandmarkerHelper(
         }
     }
 
+    private var lastTimestamp: Long = -1
+
     fun detectLiveStream(bitmap: Bitmap, isFrontCamera: Boolean, rotation: Int) {
-        if (faceLandmarker == null) {
-            android.util.Log.e(TAG, "detectLiveStream called but faceLandmarker is null")
-            return
+        if (faceLandmarker == null) return
+        
+        // Timestamps must be strictly increasing for LIVE_STREAM mode
+        var frameTime = SystemClock.uptimeMillis()
+        if (frameTime <= lastTimestamp) {
+            frameTime = lastTimestamp + 1
         }
-        val frameTime = SystemClock.uptimeMillis()
+        lastTimestamp = frameTime
 
         // Rotate and Flip according to sensor orientation and camera type
         val matrix = Matrix().apply {
-            // Android sensor orientation is typically 90 or 270.
-            // Correct the rotation so the face is "upright" for MediaPipe.
-            // For many front cameras, (360 - rotation) % 360 is common to get upright
             postRotate(rotation.toFloat())
-            
             if (isFrontCamera) {
                 // Mirror for front camera AFTER rotation to match selfie preview
-                postScale(-1f, 1f)
+                val newWidth = if (rotation % 180 == 0) bitmap.width else bitmap.height
+                val newHeight = if (rotation % 180 == 0) bitmap.height else bitmap.width
+                postScale(-1f, 1f, newWidth.toFloat() / 2f, newHeight.toFloat() / 2f)
             }
         }
         

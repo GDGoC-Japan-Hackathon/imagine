@@ -151,42 +151,47 @@ class MainActivity : FlutterActivity() {
         width: Int,
         height: Int
     ): android.graphics.Bitmap? {
-        val yuvBytes = ByteArray(width * height * 3 / 2)
-        
-        // Y プレーンのコピー (ロウストライドを考慮)
-        for (row in 0 until height) {
-            val ySourceOffset = row * yRowStride
-            val yDestOffset = row * width
-            System.arraycopy(y, ySourceOffset, yuvBytes, yDestOffset, minOf(width, y.size - ySourceOffset))
-        }
-        
-        // U/V プレーン (UV 交互配置の NV21 形式へ)
-        val uvOffset = width * height
-        val uvHeight = height / 2
-        val uvWidth = width / 2
-        
-        for (row in 0 until uvHeight) {
-            for (col in 0 until uvWidth) {
-                val sourceIdx = row * uvRowStride + col * uvPixelStride
-                val destIdx = uvOffset + row * width + col * 2
-                
-                // NV21 is V, U, V, U...
-                if (sourceIdx < v.size && destIdx < yuvBytes.size) {
-                    yuvBytes[destIdx] = v[sourceIdx]
-                }
-                if (sourceIdx < u.size && destIdx + 1 < yuvBytes.size) {
-                    yuvBytes[destIdx + 1] = u[sourceIdx]
+        return try {
+            val argb = IntArray(width * height)
+            
+            for (row in 0 until height) {
+                for (col in 0 until width) {
+                    val yIdx = row * yRowStride + col
+                    val uvRow = row / 2
+                    val uvCol = col / 2
+                    val uvIdx = uvRow * uvRowStride + uvCol * uvPixelStride
+                    
+                    // Note: u and v are separate buffers in Flutter CameraImage
+                    // but they might point to the same storage. indexing relatively is safe.
+                    val yVal = if (yIdx < y.size) y[yIdx].toInt() and 0xFF else 0
+                    val uVal = (if (uvIdx < u.size) u[uvIdx].toInt() and 0xFF else 128) - 128
+                    val vVal = (if (uvIdx < v.size) v[uvIdx].toInt() and 0xFF else 128) - 128
+                    
+                    // YUV to RGB (Standard formula)
+                    var r = (yVal + 1.370705f * vVal).toInt()
+                    var g = (yVal - 0.337633f * uVal - 0.698001f * vVal).toInt()
+                    var b = (yVal + 1.732446f * uVal).toInt()
+                    
+                    r = r.coerceIn(0, 255)
+                    g = g.coerceIn(0, 255)
+                    b = b.coerceIn(0, 255)
+                    
+                    argb[row * width + col] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
                 }
             }
-        }
-
-        return try {
-            val yuvImage = YuvImage(yuvBytes, ImageFormat.NV21, width, height, null)
-            val out = ByteArrayOutputStream()
-            // Rectangle size validation
-            yuvImage.compressToJpeg(Rect(0, 0, width, height), 90, out)
-            val imageBytes = out.toByteArray()
-            BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+            
+            val originalBitmap = android.graphics.Bitmap.createBitmap(argb, width, height, android.graphics.Bitmap.Config.ARGB_8888)
+            
+            // Resize to max 320 for performance and better face detection
+            val maxSide = 320
+            if (width > maxSide || height > maxSide) {
+                val scale = maxSide.toFloat() / maxOf(width, height)
+                val newWidth = (width * scale).toInt()
+                val newHeight = (height * scale).toInt()
+                android.graphics.Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true)
+            } else {
+                originalBitmap
+            }
         } catch (e: Exception) {
             Log.e("MediaPipe", "YUV Conversion failed: ${e.message}")
             null
