@@ -247,10 +247,27 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
 
   Widget _buildStaticImageArea() {
+    final polygon = _data.polygon;
+    double aspectRatio = 16 / 9;
+    if (polygon != null && polygon.length >= 4) {
+      double minX = 1000, minY = 1000, maxX = 0, maxY = 0;
+      for (int i = 0; i < polygon.length; i += 2) {
+        final y = polygon[i];
+        final x = polygon[i + 1];
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+      if ((maxY - minY) > (maxX - minX)) {
+        aspectRatio = 3 / 4;
+      }
+    }
+
     return Padding(
       padding: const EdgeInsets.all(24.0),
       child: AspectRatio(
-        aspectRatio: 16 / 9,
+        aspectRatio: aspectRatio,
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(32),
@@ -298,7 +315,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      _buildImageWithFallback(),
+                      _buildImageWithCrop(),
                       Positioned.fill(
                         child: DecoratedBox(
                           decoration: BoxDecoration(
@@ -383,61 +400,63 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
               ),
             ],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildTagRow("AI ANALYSIS IN PROGRESS"),
-              const SizedBox(height: 12),
-              
-              SlideTransition(
-                position: _titleSlideOut,
-                child: const Text(
-                  "Generating...",
-                  style: TextStyle(
-                    fontSize: 34,
-                    fontWeight: FontWeight.w900,
-                    color: AppColors.textPrimary,
-                    letterSpacing: -0.5,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildTagRow("AI ANALYSIS IN PROGRESS"),
+                const SizedBox(height: 12),
+                
+                SlideTransition(
+                  position: _titleSlideOut,
+                  child: const Text(
+                    "Generating...",
+                    style: TextStyle(
+                      fontSize: 34,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.textPrimary,
+                      letterSpacing: -0.5,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
-
-              FadeTransition(
-                opacity: _skeletonFade,
-                child: Shimmer.fromColors(
-                  baseColor: Colors.grey.shade200,
-                  highlightColor: Colors.grey.shade50,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildShimmerContainer(width: 180, height: 16, circular: true),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Icon(Icons.calendar_today, size: 14, color: Colors.grey.shade300),
-                          const SizedBox(width: 8),
-                          _buildShimmerContainer(width: 120, height: 14, circular: true),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      _buildShimmerContainer(width: double.infinity, height: 12, circular: true),
-                      const SizedBox(height: 8),
-                      _buildShimmerContainer(width: double.infinity, height: 12, circular: true),
-                      const SizedBox(height: 8),
-                      _buildShimmerContainer(width: double.infinity, height: 12, circular: true),
-                      const SizedBox(height: 8),
-                      _buildShimmerContainer(width: 180, height: 12, circular: true),
-                    ],
+                const SizedBox(height: 16),
+  
+                FadeTransition(
+                  opacity: _skeletonFade,
+                  child: Shimmer.fromColors(
+                    baseColor: Colors.grey.shade200,
+                    highlightColor: Colors.grey.shade50,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildShimmerContainer(width: 180, height: 16, circular: true),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Icon(Icons.calendar_today, size: 14, color: Colors.grey.shade300),
+                            const SizedBox(width: 8),
+                            _buildShimmerContainer(width: 120, height: 14, circular: true),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        _buildShimmerContainer(width: double.infinity, height: 12, circular: true),
+                        const SizedBox(height: 8),
+                        _buildShimmerContainer(width: double.infinity, height: 12, circular: true),
+                        const SizedBox(height: 8),
+                        _buildShimmerContainer(width: double.infinity, height: 12, circular: true),
+                        const SizedBox(height: 8),
+                        _buildShimmerContainer(width: 180, height: 12, circular: true),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 24),
-
-              if (!isLandscape) const Spacer() else const SizedBox(height: 48),
-
-              _buildOutlineButtons(),
-            ],
+                const SizedBox(height: 24),
+  
+                const SizedBox(height: 48),
+  
+                _buildOutlineButtons(),
+              ],
+            ),
           ),
         ),
       ),
@@ -522,23 +541,52 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
   }
 
 
-  Widget _buildImageWithFallback() {
+  Widget _buildImageWithCrop() {
+    final polygon = _data.polygon;
     final imagePath = _data.imagePath;
-    final ImageProvider imageProvider;
-    if (imagePath.startsWith('assets/')) {
-      imageProvider = AssetImage(imagePath);
-    } else {
-      imageProvider = FileImage(File(imagePath));
+    final ImageProvider imageProvider = imagePath.startsWith('assets/') ? AssetImage(imagePath) : FileImage(File(imagePath));
+
+    if (polygon == null || polygon.length < 4) {
+      return Image(image: imageProvider, fit: BoxFit.cover);
     }
 
-    return Image(
-      image: imageProvider,
-      fit: BoxFit.cover,
-      errorBuilder: (context, error, stackTrace) {
-        return Container(
-          color: Colors.grey.shade300,
-          child: const Center(
-            child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
+    // 境界矩形の計算 (Geminiの座標は 0~1000 の範囲 [y1, x1, y2, x2, ...])
+    double minX = 1000, minY = 1000, maxX = 0, maxY = 0;
+    for (int i = 0; i < polygon.length; i += 2) {
+      final y = polygon[i];
+      final x = polygon[i + 1];
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+
+    // マージンを追加 (少し周囲を見せる)
+    const margin = 50.0;
+    minX = (minX - margin).clamp(0, 1000);
+    minY = (minY - margin).clamp(0, 1000);
+    maxX = (maxX + margin).clamp(0, 1000);
+    maxY = (maxY + margin).clamp(0, 1000);
+
+    final left = minX / 1000;
+    final top = minY / 1000;
+    final width = (maxX - minX) / 1000;
+    final height = (maxY - minY) / 1000;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return ClipRect(
+          child: FractionallySizedBox(
+            widthFactor: 1.0 / (width > 0 ? width : 1.0),
+            heightFactor: 1.0 / (height > 0 ? height : 1.0),
+            alignment: FractionalOffset(
+              width < 1.0 ? left / (1.0 - width) : 0.5,
+              height < 1.0 ? top / (1.0 - height) : 0.5,
+            ),
+            child: Image(
+              image: imageProvider,
+              fit: BoxFit.fill,
+            ),
           ),
         );
       },

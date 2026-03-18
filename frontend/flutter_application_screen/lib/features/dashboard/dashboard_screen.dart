@@ -14,7 +14,9 @@ import '../camera/models/face_vector.dart';
 import '../camera/services/camera_service.dart';
 import '../camera/services/face_tracker_service.dart';
 import '../camera/services/gemini_service.dart';
+import '../camera/services/gemini_service.dart';
 import '../camera/services/mediapipe_service.dart';
+import '../camera/models/test_scenery.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -397,17 +399,42 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   }
 
   Future<AnalysisData> _captureAndAnalyze(FaceVector targetVector, {XFile? preCapturedImage}) async {
-    final outImage = preCapturedImage ?? await _cameraService.captureOutCameraImage();
+    XFile? outImage;
+    FaceVector effectiveVector = targetVector;
+
+    if (_debugMode) {
+      // テストモード: アセットから画像を取得し、正規化座標をセット
+      final testScenery = TestScenery.getRandom();
+      final byteData = await rootBundle.load(testScenery.assetPath);
+      final tempFile = File('${Directory.systemTemp.path}/test_scenery.png');
+      await tempFile.writeAsBytes(byteData.buffer.asUint8List(byteData.offsetInBytes, byteData.lengthInBytes));
+      
+      outImage = XFile(tempFile.path);
+      effectiveVector = testScenery.targetVector;
+      
+      print("DEBUG_MODE: Using test asset ${testScenery.assetPath} at ${effectiveVector.x}, ${effectiveVector.y}");
+    } else {
+      outImage = preCapturedImage ?? await _cameraService.captureOutCameraImage();
+    }
     
     if (outImage != null) {
-      final result = await _geminiService.analyzeAndMask(File(outImage.path), targetVector.x, targetVector.y);
+      final result = await _geminiService.analyzeAndMask(File(outImage.path), effectiveVector.x, effectiveVector.y);
       
+      // Geminiの結果からポリゴン情報を抽出
+      final segArray = result.segData;
+      List<double>? polygon;
+      if (segArray.isNotEmpty && segArray[0] is Map && segArray[0]['polygon'] is List) {
+        final rawPolygon = segArray[0]['polygon'] as List;
+        polygon = rawPolygon.map((e) => (e as num).toDouble()).toList();
+      }
+
       return AnalysisData(
         tag: "AI RECOGNITION",
         title: result.targetName,
         subtitle: "Analyzed by Gemini",
         description: result.guideDesc,
         imagePath: outImage.path,
+        polygon: polygon,
       );
     } else {
       throw Exception("撮影に失敗しました。");
