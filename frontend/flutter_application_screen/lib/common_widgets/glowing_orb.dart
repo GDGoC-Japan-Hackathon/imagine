@@ -166,10 +166,16 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
     final dx = offset.dx.clamp(-1.0, 1.0) * (widget.size * 0.2);
     final dy = offset.dy.clamp(-1.0, 1.0) * (widget.size * 0.2);
     
-    setState(() {
-      _targetEyeOffset = Offset(dx, dy);
-      _currentEyeOffset = Offset.lerp(_currentEyeOffset, _targetEyeOffset, 0.4) ?? _targetEyeOffset;
-    });
+    // Only visually follow the face if we have meaningful progress
+    if (_progress >= 0.5) {
+      setState(() {
+        _targetEyeOffset = Offset(dx, dy);
+        _currentEyeOffset = Offset.lerp(_currentEyeOffset, _targetEyeOffset, 0.4) ?? _targetEyeOffset;
+      });
+    } else {
+      // Keep target at zero or let random looking handle it
+      _targetEyeOffset = Offset.zero;
+    }
   }
 
   void pullTowards(Offset tapDelta) async {
@@ -217,7 +223,7 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
   void _startRandomLooking() async {
     final random = math.Random();
     while (mounted) {
-      if (_isTracking) {
+      if (_isTracking && _progress >= 0.5) {
         await Future.delayed(const Duration(milliseconds: 100));
         continue;
       }
@@ -267,7 +273,7 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
               alignment: Alignment.center,
               children: [
                 // outer progress ring
-                if (_isTracking || _progress > 0)
+                if ((_isTracking || _progress > 0) && _progress >= 0.5)
                   TweenAnimationBuilder<double>(
                     tween: Tween<double>(begin: 0, end: _progress),
                     duration: const Duration(milliseconds: 200),
@@ -286,7 +292,7 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
                   ),
                 
                 // Shadow for the ring
-                if (_isTracking || _progress > 0)
+                if ((_isTracking || _progress > 0) && _progress >= 0.5)
                   Container(
                     width: widget.size * 1.25,
                     height: widget.size * 1.25,
@@ -311,18 +317,18 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
                       shape: BoxShape.circle,
                       color: _isStable 
                         ? const Color(0xFFE2F063) 
-                        : (_isTracking ? const Color(0xFFD4E157) : AppColors.orbBackground),
+                        : ((_isTracking && _progress >= 0.5) ? const Color(0xFFD4E157) : AppColors.orbBackground),
                       boxShadow: [
                         // Inner glow (Breathing)
                         BoxShadow(
-                          color: (_isStable ? Colors.white : (_isTracking ? const Color(0xFFE2F063) : AppColors.orbGlowYellow))
+                          color: (_isStable ? Colors.white : ((_isTracking && _progress >= 0.5) ? const Color(0xFFE2F063) : AppColors.orbGlowYellow))
                               .withValues(alpha: 0.5 + (_breathingAnimation.value * 0.3)),
-                          blurRadius: (_isStable ? 45 : (_isTracking ? 35 : 30)) + (_breathingAnimation.value * 15),
-                          spreadRadius: (_isStable ? 18 : (_isTracking ? 12 : 10)) + (_breathingAnimation.value * 8),
+                          blurRadius: (_isStable ? 45 : ((_isTracking && _progress >= 0.5) ? 35 : 30)) + (_breathingAnimation.value * 15),
+                          spreadRadius: (_isStable ? 18 : ((_isTracking && _progress >= 0.5) ? 12 : 10)) + (_breathingAnimation.value * 8),
                         ),
                         // Outer glow (Breathing)
                         BoxShadow(
-                          color: (_isTracking ? const Color(0xFFBCCB3D).withValues(alpha: 0.4) : AppColors.orbGlowOuter.withValues(alpha: 0.3))
+                          color: ((_isTracking && _progress >= 0.5) ? const Color(0xFFBCCB3D).withValues(alpha: 0.4) : AppColors.orbGlowOuter.withValues(alpha: 0.3))
                               .withValues(alpha: 0.3 + (_breathingAnimation.value * 0.2)),
                           blurRadius: 60 + (_breathingAnimation.value * 20),
                           spreadRadius: 20 + (_breathingAnimation.value * 10),
@@ -359,6 +365,23 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
                             ],
                           ),
                         ),
+                         // Central subtle yellow gradient base
+                        if (_isTracking && _progress >= 0.5)
+                          Transform.translate(
+                             offset: _currentEyeOffset,
+                             child: Container(
+                                width: widget.size * 0.8,
+                                height: widget.size * 0.2,
+                                decoration: BoxDecoration(
+                                  gradient: RadialGradient(
+                                    colors: [
+                                      const Color(0xFFE2F063).withValues(alpha: 0.3),
+                                      Colors.transparent,
+                                    ],
+                                  ),
+                                ),
+                             ),
+                          ),
                         if (_isStable)
                            Center(
                              child: Container(
@@ -387,20 +410,22 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
   Widget _buildEye({required bool isLeft}) {
     final blinkScore = isLeft ? _leftBlinkScore : _rightBlinkScore;
     
+    final bool visuallyTracking = _isTracking && _progress >= 0.5;
+    
     // プログレスに合わせて横幅を広げ、高さを絞る（フォーカス効果）
-    final double focusWidthFactor = _isTracking ? (0.06 + _progress * 0.04) : 0.06;
-    final double focusHeightFactor = _isTracking ? (0.06 - _progress * 0.04) : 0.06;
+    final double focusWidthFactor = visuallyTracking ? (0.06 + _progress * 0.04) : 0.06;
+    final double focusHeightFactor = visuallyTracking ? (0.06 - _progress * 0.04) : 0.06;
 
     final eyeWidth = _isStable 
         ? widget.size * 0.12 
-        : (_isTracking ? (widget.size * (focusWidthFactor + _smileScore * 0.02)) : widget.size * 0.06);
+        : (visuallyTracking ? (widget.size * (focusWidthFactor + _smileScore * 0.02)) : widget.size * 0.06);
     
     // スマイルやスクイントで高さが減る、まばたきで閉じる
-    double eyeHeight = _isStable ? 2.0 : (_isTracking ? widget.size * focusHeightFactor : widget.size * 0.06);
+    double eyeHeight = _isStable ? 2.0 : (visuallyTracking ? widget.size * focusHeightFactor : widget.size * 0.06);
     
     if (_isBlinking || blinkScore > 0.5) {
       eyeHeight = 0.0;
-    } else if (_isTracking && !_isStable) {
+    } else if (visuallyTracking && !_isStable) {
       // 笑顔レベルに合わせてさらに目を細める
       eyeHeight = eyeHeight * (1.0 - (_smileScore * 0.5 + _squintScore * 0.3)).clamp(0.1, 1.0);
     }
@@ -408,7 +433,7 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
     // プログレスが高いほど瞳が明るく輝く
     final eyeColor = _isStable 
         ? Colors.black 
-        : Color.lerp(Colors.white, const Color(0xFFE2F063), _progress) ?? Colors.white;
+        : (visuallyTracking ? (Color.lerp(Colors.white, const Color(0xFFE2F063), _progress) ?? Colors.white) : Colors.white);
 
     return Flexible(
       child: AnimatedContainer(
@@ -423,7 +448,7 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
             BoxShadow(
               color: _isStable 
                   ? Colors.black26 
-                  : (Color.lerp(Colors.white54, const Color(0xFFE2F063), _progress) ?? Colors.white54),
+                  : (visuallyTracking ? (Color.lerp(Colors.white54, const Color(0xFFE2F063), _progress) ?? Colors.white54) : Colors.transparent),
               blurRadius: 5 + (_progress * 5),
               spreadRadius: 2 + (_progress * 2),
             ),
