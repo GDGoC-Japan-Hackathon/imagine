@@ -70,6 +70,7 @@ flutter:
     - assets/app_icon.png
     - assets/app_icon_fg.png
     - assets/brewery.png
+    - assets/tokyo_place.png
     - .env
 
   # An image asset can refer to one or more resolution-specific "variants", see
