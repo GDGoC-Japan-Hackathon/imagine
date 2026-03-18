@@ -38,6 +38,9 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
   double _rightBlinkScore = 0.0;
   double _squintScore = 0.0;
 
+  // Face stabilization progress (0.0 to 1.0)
+  double _progress = 0.0;
+
   @override
   void initState() {
     super.initState();
@@ -99,6 +102,7 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
       _isStable = stable;
       if (stable) {
         _isBlinking = false;
+        _progress = 1.0;
         // 安定時は高速で強烈なパルス
         _breathingController.duration = const Duration(milliseconds: 600);
         _breathingController.repeat(reverse: true);
@@ -107,6 +111,13 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
         _breathingController.duration = _isTracking ? const Duration(seconds: 2) : const Duration(seconds: 4);
         _breathingController.repeat(reverse: true);
       }
+    });
+  }
+
+  void setProgress(double progress) {
+    if (!mounted) return;
+    setState(() {
+      _progress = progress.clamp(0.0, 1.0);
     });
   }
 
@@ -248,76 +259,123 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
         final interactiveOffset = _currentPullOffset * _pullController.value;
         final totalOffset = Offset(_floatingXAnimation.value, _floatingYAnimation.value) + interactiveOffset;
         
-        return Transform.translate(
-          offset: totalOffset,
-          child: Container(
-            width: widget.size,
-            height: widget.size,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: _isStable 
-                ? const Color(0xFFE2F063) 
-                : (_isTracking ? const Color(0xFFD4E157) : AppColors.orbBackground),
-              boxShadow: [
-                // Inner glow (Breathing)
-                BoxShadow(
-                  color: (_isStable ? Colors.white : (_isTracking ? const Color(0xFFE2F063) : AppColors.orbGlowYellow))
-                      .withValues(alpha: 0.5 + (_breathingAnimation.value * 0.3)),
-                  blurRadius: (_isStable ? 45 : (_isTracking ? 35 : 30)) + (_breathingAnimation.value * 15),
-                  spreadRadius: (_isStable ? 18 : (_isTracking ? 12 : 10)) + (_breathingAnimation.value * 8),
-                ),
-                // Outer glow (Breathing)
-                BoxShadow(
-                  color: (_isTracking ? const Color(0xFFBCCB3D).withValues(alpha: 0.4) : AppColors.orbGlowOuter.withValues(alpha: 0.3))
-                      .withValues(alpha: 0.3 + (_breathingAnimation.value * 0.2)),
-                  blurRadius: 60 + (_breathingAnimation.value * 20),
-                  spreadRadius: 20 + (_breathingAnimation.value * 10),
-                ),
-              ],
-            ),
+        return Center(
+          child: SizedBox(
+            width: widget.size * 1.4,
+            height: widget.size * 1.4,
             child: Stack(
               alignment: Alignment.center,
               children: [
-                // Central subtle yellow gradient base
-                Container(
-                  width: widget.size * 0.8,
-                  height: widget.size * 0.8,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        AppColors.orbGlowYellow.withValues(alpha: 0.8),
-                        Colors.transparent,
+                // outer progress ring
+                if (_isTracking || _progress > 0)
+                  TweenAnimationBuilder<double>(
+                    tween: Tween<double>(begin: 0, end: _progress),
+                    duration: const Duration(milliseconds: 200),
+                    builder: (context, value, child) {
+                      return SizedBox(
+                        width: widget.size * 1.25,
+                        height: widget.size * 1.25,
+                        child: CircularProgressIndicator(
+                          value: value,
+                          strokeWidth: 4,
+                          backgroundColor: Colors.white10,
+                          color: _isStable ? const Color(0xFFE2F063) : const Color(0xFFBCCB3D).withValues(alpha: 0.8),
+                        ),
+                      );
+                    },
+                  ),
+                
+                // Shadow for the ring
+                if (_isTracking || _progress > 0)
+                  Container(
+                    width: widget.size * 1.25,
+                    height: widget.size * 1.25,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: (_isStable ? const Color(0xFFE2F063) : const Color(0xFFBCCB3D)).withValues(alpha: 0.2),
+                          blurRadius: 15,
+                          spreadRadius: 2,
+                        ),
                       ],
-                      stops: const [0.1, 0.8],
+                    ),
+                  ),
+
+                Transform.translate(
+                  offset: totalOffset,
+                  child: Container(
+                    width: widget.size,
+                    height: widget.size,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _isStable 
+                        ? const Color(0xFFE2F063) 
+                        : (_isTracking ? const Color(0xFFD4E157) : AppColors.orbBackground),
+                      boxShadow: [
+                        // Inner glow (Breathing)
+                        BoxShadow(
+                          color: (_isStable ? Colors.white : (_isTracking ? const Color(0xFFE2F063) : AppColors.orbGlowYellow))
+                              .withValues(alpha: 0.5 + (_breathingAnimation.value * 0.3)),
+                          blurRadius: (_isStable ? 45 : (_isTracking ? 35 : 30)) + (_breathingAnimation.value * 15),
+                          spreadRadius: (_isStable ? 18 : (_isTracking ? 12 : 10)) + (_breathingAnimation.value * 8),
+                        ),
+                        // Outer glow (Breathing)
+                        BoxShadow(
+                          color: (_isTracking ? const Color(0xFFBCCB3D).withValues(alpha: 0.4) : AppColors.orbGlowOuter.withValues(alpha: 0.3))
+                              .withValues(alpha: 0.3 + (_breathingAnimation.value * 0.2)),
+                          blurRadius: 60 + (_breathingAnimation.value * 20),
+                          spreadRadius: 20 + (_breathingAnimation.value * 10),
+                        ),
+                      ],
+                    ),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        // Central subtle yellow gradient base
+                        Container(
+                          width: widget.size * 0.8,
+                          height: widget.size * 0.8,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: RadialGradient(
+                              colors: [
+                                AppColors.orbGlowYellow.withValues(alpha: 0.8),
+                                Colors.transparent,
+                              ],
+                              stops: const [0.1, 0.8],
+                            ),
+                          ),
+                        ),
+                        // Eyes (Translates based on looking animation)
+                        Transform.translate(
+                          offset: _currentEyeOffset,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              _buildEye(isLeft: true),
+                              SizedBox(width: widget.size * (_isStable ? 0.2 : 0.15)),
+                              _buildEye(isLeft: false),
+                            ],
+                          ),
+                        ),
+                        if (_isStable)
+                           Center(
+                             child: Container(
+                               width: widget.size * 0.4,
+                               height: 2,
+                               decoration: BoxDecoration(
+                                 color: Colors.black.withValues(alpha: 0.5 * _breathingAnimation.value),
+                                 boxShadow: [
+                                   BoxShadow(color: Colors.white, blurRadius: 4 * _breathingAnimation.value),
+                                 ],
+                               ),
+                             ),
+                           ),
+                      ],
                     ),
                   ),
                 ),
-                // Eyes (Translates based on looking animation)
-                Transform.translate(
-                  offset: _currentEyeOffset,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _buildEye(isLeft: true),
-                      SizedBox(width: widget.size * (_isStable ? 0.2 : 0.15)),
-                      _buildEye(isLeft: false),
-                    ],
-                  ),
-                ),
-                if (_isStable)
-                   Center(
-                     child: Container(
-                       width: widget.size * 0.4,
-                       height: 2,
-                       decoration: BoxDecoration(
-                         color: Colors.white.withValues(alpha: 0.5 * _breathingAnimation.value),
-                         boxShadow: [
-                           BoxShadow(color: Colors.white, blurRadius: 4 * _breathingAnimation.value),
-                         ],
-                       ),
-                     ),
-                   ),
               ],
             ),
           ),
@@ -329,18 +387,28 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
   Widget _buildEye({required bool isLeft}) {
     final blinkScore = isLeft ? _leftBlinkScore : _rightBlinkScore;
     
+    // プログレスに合わせて横幅を広げ、高さを絞る（フォーカス効果）
+    final double focusWidthFactor = _isTracking ? (0.06 + _progress * 0.04) : 0.06;
+    final double focusHeightFactor = _isTracking ? (0.06 - _progress * 0.04) : 0.06;
+
     final eyeWidth = _isStable 
         ? widget.size * 0.12 
-        : (_isTracking ? (widget.size * (0.08 + _smileScore * 0.02)) : widget.size * 0.06);
+        : (_isTracking ? (widget.size * (focusWidthFactor + _smileScore * 0.02)) : widget.size * 0.06);
     
     // スマイルやスクイントで高さが減る、まばたきで閉じる
-    double eyeHeight = _isStable ? 2.0 : (_isTracking ? widget.size * 0.07 : widget.size * 0.06);
+    double eyeHeight = _isStable ? 2.0 : (_isTracking ? widget.size * focusHeightFactor : widget.size * 0.06);
+    
     if (_isBlinking || blinkScore > 0.5) {
       eyeHeight = 0.0;
-    } else if (_isTracking) {
-      // 笑顔レベルに合わせて目を細める
+    } else if (_isTracking && !_isStable) {
+      // 笑顔レベルに合わせてさらに目を細める
       eyeHeight = eyeHeight * (1.0 - (_smileScore * 0.5 + _squintScore * 0.3)).clamp(0.1, 1.0);
     }
+
+    // プログレスが高いほど瞳が明るく輝く
+    final eyeColor = _isStable 
+        ? Colors.black 
+        : Color.lerp(Colors.white, const Color(0xFFE2F063), _progress) ?? Colors.white;
 
     return Flexible(
       child: AnimatedContainer(
@@ -348,14 +416,16 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
         width: eyeWidth,
         height: eyeHeight,
         decoration: BoxDecoration(
-          color: _isStable ? Colors.black : Colors.white,
+          color: eyeColor,
           borderRadius: BorderRadius.circular(_isStable ? 1 : widget.size),
           shape: BoxShape.rectangle,
           boxShadow: [
             BoxShadow(
-              color: _isStable ? Colors.black26 : Colors.white54,
-              blurRadius: 5,
-              spreadRadius: 2,
+              color: _isStable 
+                  ? Colors.black26 
+                  : (Color.lerp(Colors.white54, const Color(0xFFE2F063), _progress) ?? Colors.white54),
+              blurRadius: 5 + (_progress * 5),
+              spreadRadius: 2 + (_progress * 2),
             ),
           ],
         ),
