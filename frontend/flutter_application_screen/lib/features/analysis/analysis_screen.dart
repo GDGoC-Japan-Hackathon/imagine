@@ -38,6 +38,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
   bool _isNavigatingBack = false;
 
   final AudioPlayer _audioPlayer = AudioPlayer();
+  StreamSubscription? _playerCompleteSubscription;
+  Timer? _autoExitTimer;
 
   // Animation values
   late Animation<double> _imageDissolve;
@@ -128,6 +130,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
       });
     }
 
+    _playerCompleteSubscription = _audioPlayer.onPlayerComplete.listen((_) {
+      _startAutoExitTimer(const Duration(seconds: 3));
+    });
   }
 
   Future<void> _playAudio() async {
@@ -136,8 +141,22 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
         await _audioPlayer.play(BytesSource(_data.audioBytes!));
       } catch (e) {
         debugPrint("Error playing audio: $e");
+        // 再生エラー時はフォールバックとして3秒後に戻る
+        _startAutoExitTimer(const Duration(seconds: 3));
       }
+    } else {
+      // TTSがない場合は、表示完了から3秒後に戻る
+      _startAutoExitTimer(const Duration(seconds: 3));
     }
+  }
+
+  void _startAutoExitTimer(Duration delay) {
+    _autoExitTimer?.cancel();
+    _autoExitTimer = Timer(delay, () {
+      if (mounted) {
+        _navigateToDashboard();
+      }
+    });
   }
 
   // Removed _initAutoReturnTracking and _startFaceTracking functionality
@@ -145,6 +164,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
   @override
   void dispose() {
     _transitionController.dispose();
+    _playerCompleteSubscription?.cancel();
+    _autoExitTimer?.cancel();
     _audioPlayer.dispose();
     super.dispose();
   }
@@ -157,6 +178,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
   Future<void> _navigateToDashboard({dynamic result}) async {
     if (_isNavigatingBack) return;
     _isNavigatingBack = true;
+    _autoExitTimer?.cancel();
 
     if (mounted) {
       Navigator.of(context).pop(result);
