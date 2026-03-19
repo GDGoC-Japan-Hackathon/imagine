@@ -177,7 +177,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           if (mounted) {
             setState(() {
               _hasFaceInFrame = false;
-              _detectedFaceRect = null;
             });
             _orbKey.currentState?.setTracking(false);
             _orbKey.currentState?.setFaceOffset(null);
@@ -457,7 +456,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       outImage = XFile(tempFile.path);
       effectiveVector = testScenery.targetVector;
       
-      print("DEBUG_MODE: Using test asset ${testScenery.assetPath} at ${effectiveVector.x}, ${effectiveVector.y}");
+      debugPrint("DEBUG_MODE: Using test asset ${testScenery.assetPath} at ${effectiveVector.x}, ${effectiveVector.y}");
     } else {
       outImage = preCapturedImage ?? await _cameraService.captureOutCameraImage();
     }
@@ -698,12 +697,13 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                                   alignment: Alignment.centerLeft,
                                   children: <Widget>[
                                     ...previousChildren,
-                                    if (currentChild != null) currentChild,
+                                    if (currentChild != null) currentChild!,
                                   ],
                                 );
                               },
                               transitionBuilder: (Widget child, Animation<double> animation) {
                                 return FadeTransition(
+                                  opacity: animation,
                                   child: SlideTransition(
                                     position: Tween<Offset>(
                                       begin: const Offset(0, 0.2),
