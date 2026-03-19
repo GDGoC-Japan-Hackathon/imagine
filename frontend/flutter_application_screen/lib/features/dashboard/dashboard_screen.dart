@@ -38,7 +38,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   bool _isProcessing = false;
   bool _skipFaceDetection = false;
   bool _debugMode = false;
-  String _statusMessage = "AIを起動しています...";
+  String _statusMessage = "起動中";
   
   // ユーザーガイド・解析用
   bool _isAnalyzing = false;
@@ -105,7 +105,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         setState(() => _statusMessage = "自動撮影テスト中...");
         _autoTriggerCapture();
       } else {
-        setState(() => _statusMessage = "風景に心を通わせましょう");
+        setState(() => _statusMessage = "景色に注目してください");
         _startFaceTracking();
         _startGuidanceTimer();
       }
@@ -123,7 +123,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       final now = DateTime.now();
       if (now.difference(_lastFaceDetectedTime).inSeconds > 5 && !_hasFaceInFrame) {
         setState(() {
-          _statusMessage = "リラックスして、外の景色を眺めてください";
+          _statusMessage = "外の景色を眺めてください";
         });
       }
       return true;
@@ -379,7 +379,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _debugMode ? "DEBUG ERROR" : "解析を中断しました",
+                      _debugMode ? "DEBUG ERROR" : "エラー",
                       style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                     ),
                     Text(
@@ -673,7 +673,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                           );
                         },
                         child: Text(
-                          _hasFaceInFrame ? "心の動きを解析しています" : "あなたが景色に注目すると、旅が深まります",
+                          _hasFaceInFrame ? "そのまま数秒間、視線を固定してください" : "気になるものを見つめるとAIが解説します",
                           key: ValueKey<bool>(_hasFaceInFrame),
                           style: const TextStyle(
                             color: Colors.white60,
@@ -688,18 +688,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                 
                 const SizedBox(height: 40), 
                 
-                // ボタン部分のオーバーフロー防止
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: PrimaryButton(
-                    label: _skipFaceDetection ? "撮影する" : "話しかけて",
-                    icon: Icons.mic_none_outlined,
-                    onPressed: _skipFaceDetection 
-                        ? () => _navigateToGeneratingAndAnalyze(const FaceVector(0, 0))
-                        : _navigateToGenerating,
-                  ),
-                ),
+
               ],
             ),
           ),
