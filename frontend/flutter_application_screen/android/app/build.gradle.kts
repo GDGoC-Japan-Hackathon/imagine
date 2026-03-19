@@ -57,4 +57,6 @@ flutter {
 
 dependencies {
     implementation("com.google.mediapipe:tasks-vision:0.10.32")
+    implementation("androidx.car.app:app:1.4.0")
 }
+
