@@ -12,8 +12,7 @@ class CameraService {
   Future<void> initialize({bool force = false}) async {
     // 既に初期化されており、強制再起動でない場合はスキップ
     if (!force && 
-        inCameraController != null && inCameraController!.value.isInitialized &&
-        outCameraController != null && outCameraController!.value.isInitialized) {
+        inCameraController != null && inCameraController!.value.isInitialized) {
       return;
     }
 
@@ -23,16 +22,17 @@ class CameraService {
     _cameras = await availableCameras();
     if (_cameras.isEmpty) return;
     
-    // InCamera (インカメラ: 初期化してプレビュー表示・顔認識に使用)
+    // 1. InCamera (運転手側: 顔認識・プレビュー用)
+    // フロントカメラを探し、なければリストの2番目（多くのAndroidでフロントはindex 1）をフォールバックに
     final frontCamera = _cameras.firstWhere(
       (c) => c.lensDirection == CameraLensDirection.front,
-      orElse: () => _cameras.first,
+      orElse: () => _cameras.length > 1 ? _cameras[1] : _cameras.first,
     );
     
     inCameraController = CameraController(
       frontCamera, 
       ResolutionPreset.medium, 
-      enableAudio: false, // 顔認識にオーディオは不要なのでオフにして負荷軽減
+      enableAudio: false,
     );
 
     try {
@@ -41,12 +41,34 @@ class CameraService {
       print("Error initializing in-camera: $e");
     }
 
-    // OutCamera (アウトカメラ: 撮影用)
-    // ※Android仕様上、一部端末では2つのカメラ同時プレビューができないため、利用時のみ有効化する設計が安全です。
+    // アウトカメラは初期化時（常時）起動せず、必要になった瞬間にのみ起動します。
+  }
+
+  /// アウトカメラで静止画を撮影
+  Future<XFile?> captureOutCameraImage() async {
+    // 1. Androidデュアルカメラ仕様の問題（リアがフロントを上書きする現象）を防ぐため、
+    // まず完全にフロントカメラ（インカメラ）を破棄し、ハードウェアロックを解除します。
+    if (inCameraController != null) {
+      try {
+        await inCameraController!.dispose();
+      } catch (e) {
+        print("Error during in-camera dispose before capturing: $e");
+      } finally {
+        inCameraController = null;
+      }
+    }
+
+    if (_cameras.isEmpty) {
+      _cameras = await availableCameras();
+    }
+    if (_cameras.isEmpty) return null;
+
+    // 2. 風景保存用のアウトカメラを探して初期化します
     final backCamera = _cameras.firstWhere(
       (c) => c.lensDirection == CameraLensDirection.back,
-      orElse: () => _cameras.last,
+      orElse: () => _cameras.first,
     );
+    
     outCameraController = CameraController(
       backCamera, 
       ResolutionPreset.high, 
@@ -56,20 +78,36 @@ class CameraService {
     try {
       await outCameraController?.initialize();
     } catch (e) {
-      print("Error initializing out-camera: $e");
+      print("Error initializing out-camera for capture: $e");
+      return null;
     }
-  }
 
-  /// アウトカメラで静止画を撮影
-  Future<XFile?> captureOutCameraImage() async {
+    // 3. 撮影を実行
+    XFile? capturedImage;
     if (outCameraController != null && outCameraController!.value.isInitialized) {
       try {
-        return await outCameraController!.takePicture();
+        capturedImage = await outCameraController!.takePicture();
+        // 撮影直後に即座にdisposeすると、ネイティブ側（特にオートフォーカス解除時など）で
+        // "CameraDevice was already closed" エラーが発生してクラッシュする場合があるため、
+        // わずかなディレイを置いて後処理を待機します。（特にPixelなどの端末で有効）
+        await Future.delayed(const Duration(milliseconds: 200));
       } catch (e) {
         print("Error taking picture: $e");
       }
     }
-    return null;
+
+    // 4. 重複起動を防ぐため、撮影後は即座にアウトカメラを破棄します
+    try {
+      if (outCameraController != null) {
+        await outCameraController!.dispose();
+      }
+    } catch (e) {
+      print("Error disposing out-camera after capture: $e");
+    } finally {
+      outCameraController = null;
+    }
+
+    return capturedImage;
   }
 
   Future<void> dispose() async {
