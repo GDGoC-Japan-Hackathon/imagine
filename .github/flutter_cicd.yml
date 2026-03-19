@@ -1,0 +1,89 @@
+name: Flutter CI/CD
+
+on:
+  pull_request:
+    branches: [ main ]
+
+  push:
+    branches: [ main ]
+
+jobs:
+  test:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend/flutter_application_screen
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.0'
+
+      - name: Cache Flutter dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pub-${{ hashFiles('frontend/flutter_application_screen/pubspec.lock') }}
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Create .env file
+        run: |
+          echo "${{ secrets.ENV_FILE }}" > .env
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+
+  build:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend/flutter_application_screen
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.0'
+
+      - name: Cache Flutter dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pub-${{ hashFiles('frontend/flutter_application_screen/pubspec.lock') }}
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Create .env file
+        run: |
+          echo "${{ secrets.ENV_FILE }}" > .env
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Rename APK
+        run: |
+          mv build/app/outputs/flutter-apk/app-release.apk \
+             build/app/outputs/flutter-apk/app-${{ github.ref_name }}-${{ github.run_number }}.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-${{ github.ref_name }}-${{ github.run_number }}
+          path: frontend/flutter_application_screen/build/app/outputs/flutter-apk/app-${{ github.ref_name }}-${{ github.run_number }}.apk
