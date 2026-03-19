@@ -9,6 +9,7 @@ import '../../core/theme/app_colors.dart';
 import 'dart:math' as math;
 import 'dart:async';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 enum AnalysisPhase { generating, peakPulse, convergence, reveal, complete }
 
@@ -35,6 +36,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
   // Result tracking
   bool _isNavigatingBack = false;
+
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   // Animation values
   late Animation<double> _imageDissolve;
@@ -103,6 +106,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
           _phase = AnalysisPhase.complete;
           _resultShowTime = DateTime.now();
         });
+        _playAudio();
       }
     });
 
@@ -126,11 +130,22 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
   }
 
+  Future<void> _playAudio() async {
+    if (_data.audioBytes != null) {
+      try {
+        await _audioPlayer.play(BytesSource(_data.audioBytes!));
+      } catch (e) {
+        debugPrint("Error playing audio: $e");
+      }
+    }
+  }
+
   // Removed _initAutoReturnTracking and _startFaceTracking functionality
 
   @override
   void dispose() {
     _transitionController.dispose();
+    _audioPlayer.dispose();
     super.dispose();
   }
 

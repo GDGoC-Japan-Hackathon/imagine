@@ -1,6 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:http/http.dart' as http;
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
+import 'package:googleapis_auth/auth_io.dart' as auth;
 
 class GeminiAnalysisResult {
   final String targetName;
@@ -12,14 +16,18 @@ class GeminiAnalysisResult {
 
 class GeminiService {
   GenerativeModel? _model;
+  String? _geminiKey;
+  String? _serviceAccountJson;
   // 最新安定版の Flash モデル 'gemini-2.5-flash' を指定
   final String modelName = 'gemini-2.5-flash'; 
 
-  void initialize(String apiKey) {
+  void initialize(String geminiKey, String? serviceAccountJson) {
+    _geminiKey = geminiKey;
+    _serviceAccountJson = serviceAccountJson;
     if (_model == null) {
       _model = GenerativeModel(
         model: modelName,
-        apiKey: apiKey,
+        apiKey: geminiKey,
       );
     }
   }
@@ -97,4 +105,74 @@ $locationDesc
     }
     return cleaned;
   }
+
+  Future<Uint8List?> synthesizeSpeech(String text) async {
+    String? jsonStr = _serviceAccountJson;
+    if (jsonStr == null || jsonStr.isEmpty) {
+      debugPrint("TTS OAuth Error: Service Account JSON is null or empty");
+      return null;
+    }
+
+    // .env でクォート（' や "）で囲まれている場合を考慮し、最初の '{' から最後の '}' までを抽出
+    jsonStr = jsonStr.trim();
+    final firstBrace = jsonStr.indexOf('{');
+    final lastBrace = jsonStr.lastIndexOf('}');
+    if (firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace) {
+      jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
+    } else {
+      debugPrint("TTS OAuth Error: Valid JSON part ( { ... } ) not found in string. Content starts with: ${jsonStr.length > 20 ? jsonStr.substring(0, 20) : jsonStr}");
+      return null;
+    }
+
+    debugPrint("TTS OAuth Info: JSON string extracted (length: ${jsonStr.length})");
+
+    try {
+      final accountCredentials = auth.ServiceAccountCredentials.fromJson(jsonStr);
+      final scopes = ['https://www.googleapis.com/auth/cloud-platform'];
+      
+      // 認証済みクライアントの作成
+      final authClient = await auth.clientViaServiceAccount(accountCredentials, scopes);
+
+      final url = Uri.parse('https://texttospeech.googleapis.com/v1beta1/text:synthesize');
+      final Map<String, dynamic> requestBody = {
+        "audioConfig": {
+          "audioEncoding": "LINEAR16",
+          "pitch": 0,
+          "speakingRate": 1
+        },
+        "input": {
+          "text": text
+        },
+        "voice": {
+          "languageCode": "ja-jp",
+          "modelName": "gemini-2.5-pro-tts",
+          "name": "Achernar"
+        }
+      };
+
+      try {
+        final response = await authClient.post(
+          url,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(requestBody),
+        );
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          final audioContent = data['audioContent'];
+          if (audioContent != null) {
+            return base64Decode(audioContent);
+          }
+        } else {
+          debugPrint("TTS API Error: ${response.statusCode} - ${response.body}");
+        }
+      } finally {
+        authClient.close();
+      }
+    } catch (e) {
+      debugPrint("TTS Request failed or Auth failed: $e");
+    }
+    return null;
+  }
 }
+
