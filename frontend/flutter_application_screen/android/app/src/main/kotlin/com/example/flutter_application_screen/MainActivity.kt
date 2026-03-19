@@ -170,6 +170,10 @@ class MainActivity : FlutterActivity() {
                         faceLandmarkerHelper = null
                         result.success(true)
                     }
+                    "isAutomotiveOS" -> {
+                        val isAutomotive = packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_AUTOMOTIVE)
+                        result.success(isAutomotive)
+                    }
                     else -> result.notImplemented()
                 }
             }

@@ -1,9 +1,14 @@
 import 'package:camera/camera.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class CameraService {
   static final CameraService _instance = CameraService._internal();
   factory CameraService() => _instance;
   CameraService._internal();
+
+  static const MethodChannel _channel = MethodChannel('com.example.imagine/mediapipe');
+  bool _isAutomotiveCache = false;
 
   CameraController? inCameraController;
   CameraController? outCameraController;
@@ -20,17 +25,56 @@ class CameraService {
     await dispose();
     
     _cameras = await availableCameras();
+    print("===== CAMERA INIT DEBUG =====");
+    print("Found ${_cameras.length} cameras available.");
+    for (var i = 0; i < _cameras.length; i++) {
+      print("Camera $i: ${_cameras[i].name}, direction: ${_cameras[i].lensDirection}");
+    }
+    print("=============================");
+
     if (_cameras.isEmpty) return;
     
-    // 1. InCamera (運転手側: 顔認識・プレビュー用)
-    // フロントカメラを探し、なければリストの2番目（多くのAndroidでフロントはindex 1）をフォールバックに
-    final frontCamera = _cameras.firstWhere(
-      (c) => c.lensDirection == CameraLensDirection.front,
-      orElse: () => _cameras.length > 1 ? _cameras[1] : _cameras.first,
-    );
+    try {
+      _isAutomotiveCache = await _channel.invokeMethod('isAutomotiveOS') ?? false;
+    } catch (e) {
+      print("Failed to check automotive os: $e");
+    }
+
+    CameraDescription selectedInCamera;
+    
+    // .envから手動インデックス設定を取得
+    final int manualInIndex = int.tryParse(dotenv.env['IN_CAMERA_INDEX'] ?? '-1') ?? -1;
+    
+    if (_isAutomotiveCache && manualInIndex != -1 && manualInIndex < _cameras.length) {
+      // 手動指定がある場合はそれを優先
+      selectedInCamera = _cameras[manualInIndex];
+    } else if (_isAutomotiveCache) {
+      // Android Automotive (車載機) の場合のオートロジック
+      // 1台以下ならUSBカメラ等の external を優先。それ以外はドライブレコーダー相当（front/back）を優先。
+      if (_cameras.length <= 1) {
+        selectedInCamera = _cameras.firstWhere(
+          (c) => c.lensDirection == CameraLensDirection.external,
+          orElse: () => _cameras.first,
+        );
+      } else {
+        selectedInCamera = _cameras.firstWhere(
+          (c) => c.lensDirection == CameraLensDirection.front,
+          orElse: () => _cameras.firstWhere(
+            (c) => c.lensDirection == CameraLensDirection.back,
+            orElse: () => _cameras.first,
+          ),
+        );
+      }
+    } else {
+      // スマートフォン単体の場合のロジック（従来通りフロント優先）
+      selectedInCamera = _cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.front,
+        orElse: () => _cameras.length > 1 ? _cameras[1] : _cameras.first,
+      );
+    }
     
     inCameraController = CameraController(
-      frontCamera, 
+      selectedInCamera, 
       ResolutionPreset.medium, 
       enableAudio: false,
     );
@@ -63,14 +107,30 @@ class CameraService {
     }
     if (_cameras.isEmpty) return null;
 
-    // 2. 風景保存用のアウトカメラを探して初期化します
-    final backCamera = _cameras.firstWhere(
-      (c) => c.lensDirection == CameraLensDirection.back,
-      orElse: () => _cameras.first,
-    );
+    CameraDescription selectedOutCamera;
+    
+    // .envから手動インデックス設定を取得
+    final int manualOutIndex = int.tryParse(dotenv.env['OUT_CAMERA_INDEX'] ?? '-1') ?? -1;
+
+    if (_isAutomotiveCache && manualOutIndex != -1 && manualOutIndex < _cameras.length) {
+      // 手動指定がある場合はそれを優先
+      selectedOutCamera = _cameras[manualOutIndex];
+    } else if (_isAutomotiveCache && _cameras.length <= 1) {
+      // 車載機でカメラが1台しかない場合は同じカメラを使う
+      selectedOutCamera = _cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.external,
+        orElse: () => _cameras.first,
+      );
+    } else {
+      // 2. 風景保存用のアウトカメラを探して初期化します
+      selectedOutCamera = _cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.back,
+        orElse: () => _cameras.first,
+      );
+    }
     
     outCameraController = CameraController(
-      backCamera, 
+      selectedOutCamera, 
       ResolutionPreset.high, 
       enableAudio: false,
     );
