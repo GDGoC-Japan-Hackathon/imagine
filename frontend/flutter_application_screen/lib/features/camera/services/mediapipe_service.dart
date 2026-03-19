@@ -16,9 +16,11 @@ class MediapipeService {
         return data.map((key, value) => MapEntry(key.toString(), value));
       });
 
-  Future<void> initialize() async {
+  Future<void> initialize({bool debugShowFaceImage = false}) async {
     try {
-      await _methodChannel.invokeMethod('init');
+      await _methodChannel.invokeMethod('init', {
+        'debugShowFaceImage': debugShowFaceImage,
+      });
     } on PlatformException catch (e) {
       print("Failed to initialize MediaPipe: ${e.message}");
     }
@@ -30,7 +32,8 @@ class MediapipeService {
       final y = image.planes[0].bytes;
       final u = image.planes[1].bytes;
       final v = image.planes[2].bytes;
-
+      
+      // ネイティブ側のMediaPipeで処理する
       await _methodChannel.invokeMethod('detect', {
         'y': y,
         'u': u,
