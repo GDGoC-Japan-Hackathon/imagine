@@ -35,15 +35,15 @@ class CameraService {
     await dispose();
     
     _cameras = await availableCameras();
-    print("===== CAMERA INIT DEBUG =====");
-    print("Found ${_cameras.length} cameras available.");
+    debugPrint("===== CAMERA INIT DEBUG =====");
+    debugPrint("Found ${_cameras.length} cameras available.");
     for (var i = 0; i < _cameras.length; i++) {
-      print("Camera $i: ${_cameras[i].name}, direction: ${_cameras[i].lensDirection}");
+      debugPrint("Camera $i: ${_cameras[i].name}, direction: ${_cameras[i].lensDirection}");
     }
-    print("=============================");
+    debugPrint("=============================");
 
     if (_cameras.isEmpty) {
-      print("No cameras found. Falling back to Network WebSocket Mode.");
+      debugPrint("No cameras found. Falling back to Network WebSocket Mode.");
       isNetworkMode = true;
       _networkStreamController = StreamController<Uint8List>.broadcast();
       _connectToRelay();
@@ -55,7 +55,7 @@ class CameraService {
     try {
       _isAutomotiveCache = await _channel.invokeMethod('isAutomotiveOS') ?? false;
     } catch (e) {
-      print("Failed to check automotive os: $e");
+      debugPrint("Failed to check automotive os: $e");
     }
 
     CameraDescription selectedInCamera;
@@ -100,7 +100,7 @@ class CameraService {
     try {
       await inCameraController?.initialize();
     } catch (e) {
-      print("Error initializing in-camera: $e");
+      debugPrint("Error initializing in-camera: $e");
     }
 
     // アウトカメラは初期化時（常時）起動せず、必要になった瞬間にのみ起動します。
@@ -126,7 +126,7 @@ class CameraService {
           
           return XFile(file.path);
         } catch (e) {
-          print("Failed to capture network image: $e");
+          debugPrint("Failed to capture network image: $e");
           // Attempt to restore front camera even on error
           _networkChannel?.sink.add(jsonEncode({"command": "switch_camera", "lensDirection": "front"}));
           return null;
@@ -141,7 +141,7 @@ class CameraService {
       try {
         await inCameraController!.dispose();
       } catch (e) {
-        print("Error during in-camera dispose before capturing: $e");
+        debugPrint("Error during in-camera dispose before capturing: $e");
       } finally {
         inCameraController = null;
       }
@@ -183,7 +183,7 @@ class CameraService {
     try {
       await outCameraController?.initialize();
     } catch (e) {
-      print("Error initializing out-camera for capture: $e");
+      debugPrint("Error initializing out-camera for capture: $e");
       return null;
     }
 
@@ -197,7 +197,7 @@ class CameraService {
         // わずかなディレイを置いて後処理を待機します。（特にPixelなどの端末で有効）
         await Future.delayed(const Duration(milliseconds: 200));
       } catch (e) {
-        print("Error taking picture: $e");
+        debugPrint("Error taking picture: $e");
       }
     }
 
@@ -207,7 +207,7 @@ class CameraService {
         await outCameraController!.dispose();
       }
     } catch (e) {
-      print("Error disposing out-camera after capture: $e");
+      debugPrint("Error disposing out-camera after capture: $e");
     } finally {
       outCameraController = null;
     }
@@ -227,12 +227,12 @@ class CameraService {
           _networkStreamController?.add(message);
         }
       }, onDone: () {
-        print("Network camera disconnected.");
+        debugPrint("Network camera disconnected.");
       }, onError: (e) {
-        print("Network camera error: $e");
+        debugPrint("Network camera error: $e");
       });
     } catch (e) {
-      print("Failed to connect to network relay: $e");
+      debugPrint("Failed to connect to network relay: $e");
     }
   }
 
@@ -242,7 +242,7 @@ class CameraService {
         await inCameraController!.dispose();
       }
     } catch (e) {
-      print("Error during in-camera dispose: $e");
+      debugPrint("Error during in-camera dispose: $e");
     } finally {
       inCameraController = null;
     }
@@ -252,7 +252,7 @@ class CameraService {
         await outCameraController!.dispose();
       }
     } catch (e) {
-      print("Error during out-camera dispose: $e");
+      debugPrint("Error during out-camera dispose: $e");
     } finally {
       outCameraController = null;
     }

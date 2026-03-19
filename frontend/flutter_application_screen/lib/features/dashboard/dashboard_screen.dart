@@ -7,7 +7,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../common_widgets/glowing_orb.dart';
-import '../../common_widgets/primary_button.dart';
 import '../analysis/analysis_screen.dart';
 import '../analysis/analysis_model.dart';
 import '../camera/models/face_vector.dart';
@@ -48,7 +47,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   DateTime _lastAnalysisTime = DateTime.now();
   DateTime _lastFaceDetectedTime = DateTime.now();
   bool _hasFaceInFrame = false;
-  Rect? _detectedFaceRect;
   bool _isCameraStreaming = false;
   bool _isCameraInitialized = false;
   bool _didPlayStableSound = false;
@@ -62,7 +60,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final CameraController? cameraController = _cameraService.inCameraController;
 
     // アプリがバックグラウンドに回った、またはスリープした際の処理
     if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
@@ -390,7 +387,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       _isProcessing = false;
       _didPlayStableSound = false;
       _hasFaceInFrame = false;
-      _detectedFaceRect = null;
     });
     _faceTracker.reset();
     _orbKey.currentState?.setTracking(false);
@@ -407,12 +403,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         content: Container(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           decoration: BoxDecoration(
-            color: const Color(0xFF2C3E50).withOpacity(0.9),
+            color: const Color(0xFF2C3E50).withValues(alpha: 0.9),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: Colors.white10, width: 1),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.2),
+                color: Colors.black.withValues(alpha: 0.2),
                 blurRadius: 20,
                 offset: const Offset(0, 10),
               ),
@@ -433,7 +429,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                     ),
                     Text(
                       message,
-                      style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12),
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 12),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -503,26 +499,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     super.dispose();
   }
 
-  void _navigateToGenerating() {
-    // Navigate to the generating screen when asked manually
-    Navigator.of(context).push(
-      PageRouteBuilder(
-        pageBuilder: (_, _, _) => const AnalysisScreen(),
-        transitionDuration: const Duration(milliseconds: 600),
-        reverseTransitionDuration: const Duration(milliseconds: 400),
-        transitionsBuilder: (_, animation, _, child) {
-          return FadeTransition(
-            opacity: CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeInOut,
-            ),
-            child: child,
-          );
-        },
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -554,8 +530,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                   begin: Alignment.centerLeft,
                   end: Alignment.centerRight,
                   colors: [
-                    Colors.black.withOpacity(0.1),
-                    Colors.black.withOpacity(0.4),
+                    Colors.black.withValues(alpha: 0.1),
+                    Colors.black.withValues(alpha: 0.4),
                   ],
                 ),
               ),
@@ -581,7 +557,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         width: 240,
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.7),
+          color: Colors.black.withValues(alpha: 0.7),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.white24),
         ),
@@ -641,35 +617,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     );
   }
 
-  Widget _buildFaceGuidanceOverlay() {
-    return Positioned(
-      top: 40,
-      right: 40,
-      child: Container(
-        width: 120,
-        height: 120,
-        decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.3),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white24, width: 1),
-        ),
-        child: const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.face, color: Color(0xFFE2F063), size: 40),
-              SizedBox(height: 8),
-              Text(
-                "DETECTED",
-                style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildDashboardBody() {
     return Row(
       children: [
@@ -707,7 +654,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                   child: Text(
                     "AI コンシェルジュ",
                     style: TextStyle(
-                      color: Color(0xB3FFFFFF), // Colors.white.withOpacity(0.7)
+                      color: Color(0xB3FFFFFF), // Colors.white.withValues(alpha: 0.7)
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 4.0,
@@ -720,9 +667,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.1),
+                    color: Colors.white.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white.withOpacity(0.1), width: 1),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.1), width: 1),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -757,7 +704,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                               },
                               transitionBuilder: (Widget child, Animation<double> animation) {
                                 return FadeTransition(
-                                  opacity: animation,
                                   child: SlideTransition(
                                     position: Tween<Offset>(
                                       begin: const Offset(0, 0.2),

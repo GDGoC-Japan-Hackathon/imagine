@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:google_generative_ai/google_generative_ai.dart';
-import 'package:http/http.dart' as http;
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:googleapis_auth/auth_io.dart' as auth;
 
@@ -16,20 +14,16 @@ class GeminiAnalysisResult {
 
 class GeminiService {
   GenerativeModel? _model;
-  String? _geminiKey;
   String? _serviceAccountJson;
   // 最新安定版の Flash モデル 'gemini-2.5-flash' を指定
   final String modelName = 'gemini-2.5-flash'; 
 
   void initialize(String geminiKey, String? serviceAccountJson) {
-    _geminiKey = geminiKey;
     _serviceAccountJson = serviceAccountJson;
-    if (_model == null) {
-      _model = GenerativeModel(
-        model: modelName,
-        apiKey: geminiKey,
-      );
-    }
+    _model ??= GenerativeModel(
+      model: modelName,
+      apiKey: geminiKey,
+    );
   }
 
   Future<GeminiAnalysisResult> analyzeAndMask(File imageFile, double pan, double tilt) async {

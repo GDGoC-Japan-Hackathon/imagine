@@ -1,9 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
-import 'package:camera/camera.dart';
-import 'package:flutter/foundation.dart';
-import '../dashboard/dashboard_screen.dart';
 import 'analysis_model.dart';
 import '../../core/theme/app_colors.dart';
 import 'dart:math' as math;
@@ -32,8 +29,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
   AnalysisPhase _phase = AnalysisPhase.generating;
   late AnimationController _transitionController;
   late AnalysisData _data;
-  late DateTime _screenStartTime;
-  DateTime? _resultShowTime;
 
   // Result tracking
   bool _isNavigatingBack = false;
@@ -55,7 +50,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
   @override
   void initState() {
     super.initState();
-    _screenStartTime = DateTime.now();
     _data = widget.fallbackData ?? AnalysisData.defaultData;
     
     _transitionController = AnimationController(
@@ -109,7 +103,6 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
       if (status == AnimationStatus.completed) {
         setState(() {
           _phase = AnalysisPhase.complete;
-          _resultShowTime = DateTime.now();
         });
         _playAudio();
       }
@@ -248,7 +241,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.9),
+                      color: Colors.white.withValues(alpha: 0.9),
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(

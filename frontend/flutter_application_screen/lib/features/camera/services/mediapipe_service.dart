@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
@@ -22,7 +23,7 @@ class MediapipeService {
         'debugShowFaceImage': debugShowFaceImage,
       });
     } on PlatformException catch (e) {
-      print("Failed to initialize MediaPipe: ${e.message}");
+      debugPrint("Failed to initialize MediaPipe: ${e.message}");
     }
   }
 
@@ -47,7 +48,7 @@ class MediapipeService {
         'rotation': rotation,
       });
     } on PlatformException catch (e) {
-      print("MediaPipe Detection error: ${e.message}");
+      debugPrint("MediaPipe Detection error: ${e.message}");
     }
   }
 
@@ -59,7 +60,7 @@ class MediapipeService {
         'rotation': rotation,
       });
     } on PlatformException catch (e) {
-      print("MediaPipe Detection error: ${e.message}");
+      debugPrint("MediaPipe Detection error: ${e.message}");
     }
   }
 
