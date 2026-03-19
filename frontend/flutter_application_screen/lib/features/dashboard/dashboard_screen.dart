@@ -97,7 +97,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       _isCameraInitialized = true;
 
       // APIキーの読み込み (.env ファイルから取得)
-      _geminiService.initialize(dotenv.env['GEMINI_API_KEY'] ?? ''); 
+      _geminiService.initialize(
+        dotenv.env['GEMINI_API_KEY'] ?? '',
+        dotenv.env['GOOGLE_SERVICE_ACCOUNT_JSON'] ?? '',
+      ); 
       _skipFaceDetection = dotenv.env['SKIP_FACE_DETECTION']?.toLowerCase() == 'true';
       _debugMode = dotenv.env['DEBUG_MODE']?.toLowerCase() == 'true';
       _showDebugCamera = dotenv.env['DEBUG_SHOW_CAMERA']?.toLowerCase() == 'true';
@@ -443,6 +446,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         polygon = rawPolygon.map((e) => (e as num).toDouble()).toList();
       }
 
+      // 音声データの取得 (TTS)
+      final audioBytes = await _geminiService.synthesizeSpeech(result.guideDesc);
+
       return AnalysisData(
         tag: "AI RECOGNITION",
         title: result.targetName,
@@ -450,6 +456,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         description: result.guideDesc,
         imagePath: outImage.path,
         polygon: polygon,
+        audioBytes: audioBytes,
       );
     } else {
       throw Exception("撮影に失敗しました。");

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 class AnalysisData {
   final String tag;
   final String title;
@@ -5,6 +7,7 @@ class AnalysisData {
   final String description;
   final String imagePath;
   final List<double>? polygon; // Gemini returns [y, x, y, x, ...]
+  final Uint8List? audioBytes;
 
   const AnalysisData({
     required this.tag,
@@ -13,6 +16,7 @@ class AnalysisData {
     required this.description,
     required this.imagePath,
     this.polygon,
+    this.audioBytes,
   });
 
   static const defaultData = AnalysisData(

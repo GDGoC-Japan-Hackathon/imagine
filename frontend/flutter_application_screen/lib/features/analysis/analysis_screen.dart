@@ -8,7 +8,9 @@ import 'analysis_model.dart';
 import '../../core/theme/app_colors.dart';
 import 'dart:math' as math;
 import 'dart:async';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 enum AnalysisPhase { generating, peakPulse, convergence, reveal, complete }
 
@@ -35,6 +37,12 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
   // Result tracking
   bool _isNavigatingBack = false;
+
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  StreamSubscription? _playerCompleteSubscription;
+  Timer? _autoExitTimer;
+  final ScrollController _infoScrollController = ScrollController();
+  bool _isUserScrolling = false;
 
   // Animation values
   late Animation<double> _imageDissolve;
@@ -103,6 +111,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
           _phase = AnalysisPhase.complete;
           _resultShowTime = DateTime.now();
         });
+        _playAudio();
       }
     });
 
@@ -124,6 +133,58 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
       });
     }
 
+    _playerCompleteSubscription = _audioPlayer.onPlayerComplete.listen((_) {
+      _startAutoExitTimer(const Duration(seconds: 3));
+    });
+  }
+
+  Future<void> _playAudio() async {
+    if (_data.audioBytes != null) {
+      try {
+        await _audioPlayer.play(BytesSource(_data.audioBytes!));
+        _startAutoScrolling();
+      } catch (e) {
+        debugPrint("Error playing audio: $e");
+        // 再生エラー時はフォールバックとして3秒後に戻る
+        _startAutoExitTimer(const Duration(seconds: 3));
+      }
+    } else {
+      // TTSがない場合は、表示完了から3秒後に戻る
+      _startAutoExitTimer(const Duration(seconds: 3));
+    }
+  }
+
+  Future<void> _startAutoScrolling() async {
+    // ユーザー操作をリセット
+    _isUserScrolling = false;
+
+    // レイアウトが確定して音声情報が取得できるまで少し待機
+    await Future.delayed(const Duration(milliseconds: 1000));
+    
+    if (!mounted || !_infoScrollController.hasClients) return;
+    if (_isUserScrolling) return;
+
+    final maxScroll = _infoScrollController.position.maxScrollExtent;
+    if (maxScroll <= 0) return;
+
+    final duration = await _audioPlayer.getDuration();
+    if (duration != null && duration.inSeconds > 0) {
+      // 音声の長さに合わせて等速で最後までスクロール
+      _infoScrollController.animateTo(
+        maxScroll,
+        duration: duration,
+        curve: Curves.linear,
+      );
+    }
+  }
+
+  void _startAutoExitTimer(Duration delay) {
+    _autoExitTimer?.cancel();
+    _autoExitTimer = Timer(delay, () {
+      if (mounted) {
+        _navigateToDashboard();
+      }
+    });
   }
 
   // Removed _initAutoReturnTracking and _startFaceTracking functionality
@@ -131,6 +192,10 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
   @override
   void dispose() {
     _transitionController.dispose();
+    _playerCompleteSubscription?.cancel();
+    _autoExitTimer?.cancel();
+    _audioPlayer.dispose();
+    _infoScrollController.dispose();
     super.dispose();
   }
 
@@ -142,6 +207,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
   Future<void> _navigateToDashboard({dynamic result}) async {
     if (_isNavigatingBack) return;
     _isNavigatingBack = true;
+    _autoExitTimer?.cancel();
 
     if (mounted) {
       Navigator.of(context).pop(result);
@@ -628,8 +694,19 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
           ),
         ],
       ),
-      child: SingleChildScrollView(
-        child: Column(
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          if (notification is UserScrollNotification) {
+            // ユーザーが手動スクロールを開始した場合は自動スクロールを停止
+            if (notification.direction != ScrollDirection.idle) {
+              _isUserScrolling = true;
+            }
+          }
+          return false;
+        },
+        child: SingleChildScrollView(
+          controller: _infoScrollController,
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Tag
@@ -702,8 +779,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildResultCard(bool isLandscape) {
     return FadeTransition(
