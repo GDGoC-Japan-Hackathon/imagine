@@ -26,9 +26,20 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
   Offset _currentEyeOffset = Offset.zero;
   Offset _targetEyeOffset = Offset.zero;
   bool _isBlinking = false;
+  bool _isStable = false;
+  bool _isTracking = false;
   
   // Interactive Pull variables
   Offset _currentPullOffset = Offset.zero;
+
+  // MediaPipe Blendshapes
+  double _smileScore = 0.0;
+  double _leftBlinkScore = 0.0;
+  double _rightBlinkScore = 0.0;
+  double _squintScore = 0.0;
+
+  // Face stabilization progress (0.0 to 1.0)
+  double _progress = 0.0;
 
   @override
   void initState() {
@@ -85,6 +96,88 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
     _startRandomBlinking();
   }
 
+  void setStable(bool stable) {
+    if (_isStable == stable) return;
+    setState(() {
+      _isStable = stable;
+      if (stable) {
+        _isBlinking = false;
+        _progress = 1.0;
+        // 安定時は高速で強烈なパルス
+        _breathingController.duration = const Duration(milliseconds: 600);
+        _breathingController.repeat(reverse: true);
+      } else {
+        // 通常時、またはトラッキング中のみの場合は元の速度へ
+        _breathingController.duration = _isTracking ? const Duration(seconds: 2) : const Duration(seconds: 4);
+        _breathingController.repeat(reverse: true);
+      }
+    });
+  }
+
+  void setProgress(double progress) {
+    if (!mounted) return;
+    setState(() {
+      _progress = progress.clamp(0.0, 1.0);
+    });
+  }
+
+  void setTracking(bool tracking) {
+    if (_isTracking == tracking) return;
+    setState(() {
+      _isTracking = tracking;
+      if (tracking) {
+        _breathingController.duration = const Duration(seconds: 2);
+      } else {
+        _breathingController.duration = const Duration(seconds: 4);
+        _smileScore = 0;
+        _leftBlinkScore = 0;
+        _rightBlinkScore = 0;
+        _squintScore = 0;
+      }
+      _breathingController.repeat(reverse: true);
+    });
+  }
+
+  void setBlendshapes(Map<String, double> scores) {
+    if (!mounted) return;
+    setState(() {
+      // MediaPipe Blendshape categories
+      _smileScore = (scores['mouthSmileLeft'] ?? 0) + (scores['mouthSmileRight'] ?? 0) / 2;
+      _leftBlinkScore = scores['eyeBlinkLeft'] ?? 0;
+      _rightBlinkScore = scores['eyeBlinkRight'] ?? 0;
+      _squintScore = (scores['eyeSquintLeft'] ?? 0) + (scores['eyeSquintRight'] ?? 0) / 2;
+    });
+  }
+
+  void setFaceOffset(Offset? offset) {
+    if (offset == null) {
+      if (_isTracking) {
+        setState(() {
+          _isTracking = false;
+        });
+        _startRandomLooking();
+      }
+      return;
+    }
+
+    _isTracking = true;
+    // Map camera normalized coordinates to orb displacement
+    // Let's assume input offset is roughly -30 to 30 for meaningful range
+    final dx = offset.dx.clamp(-1.0, 1.0) * (widget.size * 0.2);
+    final dy = offset.dy.clamp(-1.0, 1.0) * (widget.size * 0.2);
+    
+    // Only visually follow the face if we have meaningful progress
+    if (_progress >= 0.5) {
+      setState(() {
+        _targetEyeOffset = Offset(dx, dy);
+        _currentEyeOffset = Offset.lerp(_currentEyeOffset, _targetEyeOffset, 0.4) ?? _targetEyeOffset;
+      });
+    } else {
+      // Keep target at zero or let random looking handle it
+      _targetEyeOffset = Offset.zero;
+    }
+  }
+
   void pullTowards(Offset tapDelta) async {
     final distance = tapDelta.distance;
     final maxPull = widget.size * 0.3; // Pull up to 30% of size
@@ -130,6 +223,10 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
   void _startRandomLooking() async {
     final random = math.Random();
     while (mounted) {
+      if (_isTracking && _progress >= 0.5) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        continue;
+      }
       // 1. Wait a random amount of time (the "tame" or pause)
       final pauseDuration = Duration(milliseconds: 500 + random.nextInt(2000));
       await Future.delayed(pauseDuration);
@@ -168,57 +265,138 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
         final interactiveOffset = _currentPullOffset * _pullController.value;
         final totalOffset = Offset(_floatingXAnimation.value, _floatingYAnimation.value) + interactiveOffset;
         
-        return Transform.translate(
-          offset: totalOffset,
-          child: Container(
-            width: widget.size,
-            height: widget.size,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppColors.orbBackground,
-              boxShadow: [
-                // Inner glow (Breathing)
-                BoxShadow(
-                  color: AppColors.orbGlowYellow.withValues(alpha: 0.5 + (_breathingAnimation.value * 0.3)),
-                  blurRadius: 30 + (_breathingAnimation.value * 10),
-                  spreadRadius: 10 + (_breathingAnimation.value * 5),
-                ),
-                // Outer glow (Breathing)
-                BoxShadow(
-                  color: AppColors.orbGlowOuter.withValues(alpha: 0.3 + (_breathingAnimation.value * 0.2)),
-                  blurRadius: 60 + (_breathingAnimation.value * 20),
-                  spreadRadius: 20 + (_breathingAnimation.value * 10),
-                ),
-              ],
-            ),
+        return Center(
+          child: SizedBox(
+            width: widget.size * 1.4,
+            height: widget.size * 1.4,
             child: Stack(
               alignment: Alignment.center,
               children: [
-                // Central subtle yellow gradient base
-                Container(
-                  width: widget.size * 0.8,
-                  height: widget.size * 0.8,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        AppColors.orbGlowYellow.withValues(alpha: 0.8),
-                        Colors.transparent,
+                // outer progress ring
+                if ((_isTracking || _progress > 0) && _progress >= 0.5)
+                  TweenAnimationBuilder<double>(
+                    tween: Tween<double>(begin: 0, end: _progress),
+                    duration: const Duration(milliseconds: 200),
+                    builder: (context, value, child) {
+                      return SizedBox(
+                        width: widget.size * 1.25,
+                        height: widget.size * 1.25,
+                        child: CircularProgressIndicator(
+                          value: value,
+                          strokeWidth: 4,
+                          backgroundColor: Colors.white10,
+                          color: _isStable ? const Color(0xFFE2F063) : const Color(0xFFBCCB3D).withValues(alpha: 0.8),
+                        ),
+                      );
+                    },
+                  ),
+                
+                // Shadow for the ring
+                if ((_isTracking || _progress > 0) && _progress >= 0.5)
+                  Container(
+                    width: widget.size * 1.25,
+                    height: widget.size * 1.25,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: (_isStable ? const Color(0xFFE2F063) : const Color(0xFFBCCB3D)).withValues(alpha: 0.2),
+                          blurRadius: 15,
+                          spreadRadius: 2,
+                        ),
                       ],
-                      stops: const [0.1, 0.8],
                     ),
                   ),
-                ),
-                // Eyes (Translates based on looking animation)
+
                 Transform.translate(
-                  offset: _currentEyeOffset,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _buildEye(),
-                      SizedBox(width: widget.size * 0.15),
-                      _buildEye(),
-                    ],
+                  offset: totalOffset,
+                  child: Container(
+                    width: widget.size,
+                    height: widget.size,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _isStable 
+                        ? const Color(0xFFE2F063) 
+                        : ((_isTracking && _progress >= 0.5) ? const Color(0xFFD4E157) : AppColors.orbBackground),
+                      boxShadow: [
+                        // Inner glow (Breathing)
+                        BoxShadow(
+                          color: (_isStable ? Colors.white : ((_isTracking && _progress >= 0.5) ? const Color(0xFFE2F063) : AppColors.orbGlowYellow))
+                              .withValues(alpha: 0.5 + (_breathingAnimation.value * 0.3)),
+                          blurRadius: (_isStable ? 45 : ((_isTracking && _progress >= 0.5) ? 35 : 30)) + (_breathingAnimation.value * 15),
+                          spreadRadius: (_isStable ? 18 : ((_isTracking && _progress >= 0.5) ? 12 : 10)) + (_breathingAnimation.value * 8),
+                        ),
+                        // Outer glow (Breathing)
+                        BoxShadow(
+                          color: ((_isTracking && _progress >= 0.5) ? const Color(0xFFBCCB3D).withValues(alpha: 0.4) : AppColors.orbGlowOuter.withValues(alpha: 0.3))
+                              .withValues(alpha: 0.3 + (_breathingAnimation.value * 0.2)),
+                          blurRadius: 60 + (_breathingAnimation.value * 20),
+                          spreadRadius: 20 + (_breathingAnimation.value * 10),
+                        ),
+                      ],
+                    ),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        // Central subtle yellow gradient base
+                        Container(
+                          width: widget.size * 0.8,
+                          height: widget.size * 0.8,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: RadialGradient(
+                              colors: [
+                                AppColors.orbGlowYellow.withValues(alpha: 0.8),
+                                Colors.transparent,
+                              ],
+                              stops: const [0.1, 0.8],
+                            ),
+                          ),
+                        ),
+                        // Eyes (Translates based on looking animation)
+                        Transform.translate(
+                          offset: _currentEyeOffset,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              _buildEye(isLeft: true),
+                              SizedBox(width: widget.size * (_isStable ? 0.2 : 0.15)),
+                              _buildEye(isLeft: false),
+                            ],
+                          ),
+                        ),
+                         // Central subtle yellow gradient base
+                        if (_isTracking && _progress >= 0.5)
+                          Transform.translate(
+                             offset: _currentEyeOffset,
+                             child: Container(
+                                width: widget.size * 0.8,
+                                height: widget.size * 0.2,
+                                decoration: BoxDecoration(
+                                  gradient: RadialGradient(
+                                    colors: [
+                                      const Color(0xFFE2F063).withValues(alpha: 0.3),
+                                      Colors.transparent,
+                                    ],
+                                  ),
+                                ),
+                             ),
+                          ),
+                        if (_isStable)
+                           Center(
+                             child: Container(
+                               width: widget.size * 0.4,
+                               height: 2,
+                               decoration: BoxDecoration(
+                                 color: Colors.black.withValues(alpha: 0.5 * _breathingAnimation.value),
+                                 boxShadow: [
+                                   BoxShadow(color: Colors.white, blurRadius: 4 * _breathingAnimation.value),
+                                 ],
+                               ),
+                             ),
+                           ),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -229,21 +407,53 @@ class GlowingOrbState extends State<GlowingOrb> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildEye() {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 100),
-      width: widget.size * 0.06,
-      height: _isBlinking ? 0.0 : widget.size * 0.06,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.white54,
-            blurRadius: 5,
-            spreadRadius: 2,
-          ),
-        ],
+  Widget _buildEye({required bool isLeft}) {
+    final blinkScore = isLeft ? _leftBlinkScore : _rightBlinkScore;
+    
+    final bool visuallyTracking = _isTracking && _progress >= 0.5;
+    
+    // プログレスに合わせて横幅を広げ、高さを絞る（フォーカス効果）
+    final double focusWidthFactor = visuallyTracking ? (0.06 + _progress * 0.04) : 0.06;
+    final double focusHeightFactor = visuallyTracking ? (0.06 - _progress * 0.04) : 0.06;
+
+    final eyeWidth = _isStable 
+        ? widget.size * 0.12 
+        : (visuallyTracking ? (widget.size * (focusWidthFactor + _smileScore * 0.02)) : widget.size * 0.06);
+    
+    // スマイルやスクイントで高さが減る、まばたきで閉じる
+    double eyeHeight = _isStable ? 2.0 : (visuallyTracking ? widget.size * focusHeightFactor : widget.size * 0.06);
+    
+    if (_isBlinking || blinkScore > 0.5) {
+      eyeHeight = 0.0;
+    } else if (visuallyTracking && !_isStable) {
+      // 笑顔レベルに合わせてさらに目を細める
+      eyeHeight = eyeHeight * (1.0 - (_smileScore * 0.5 + _squintScore * 0.3)).clamp(0.1, 1.0);
+    }
+
+    // プログレスが高いほど瞳が明るく輝く
+    final eyeColor = _isStable 
+        ? Colors.black 
+        : (visuallyTracking ? (Color.lerp(Colors.white, const Color(0xFFE2F063), _progress) ?? Colors.white) : Colors.white);
+
+    return Flexible(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 50),
+        width: eyeWidth,
+        height: eyeHeight,
+        decoration: BoxDecoration(
+          color: eyeColor,
+          borderRadius: BorderRadius.circular(_isStable ? 1 : widget.size),
+          shape: BoxShape.rectangle,
+          boxShadow: [
+            BoxShadow(
+              color: _isStable 
+                  ? Colors.black26 
+                  : (visuallyTracking ? (Color.lerp(Colors.white54, const Color(0xFFE2F063), _progress) ?? Colors.white54) : Colors.transparent),
+              blurRadius: 5 + (_progress * 5),
+              spreadRadius: 2 + (_progress * 2),
+            ),
+          ],
+        ),
       ),
     );
   }

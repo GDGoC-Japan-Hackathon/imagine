@@ -1,12 +1,26 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
-import '../../core/theme/app_colors.dart';
+import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import '../dashboard/dashboard_screen.dart';
+import 'analysis_model.dart';
+import '../../core/theme/app_colors.dart';
+import 'dart:math' as math;
+import 'dart:async';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 enum AnalysisPhase { generating, peakPulse, convergence, reveal, complete }
 
 class AnalysisScreen extends StatefulWidget {
-  const AnalysisScreen({super.key});
+  final Future<AnalysisData>? analysisFuture;
+  final AnalysisData? fallbackData;
+
+  const AnalysisScreen({
+    super.key,
+    this.analysisFuture,
+    this.fallbackData,
+  });
 
   @override
   State<AnalysisScreen> createState() => _AnalysisScreenState();
@@ -15,6 +29,12 @@ class AnalysisScreen extends StatefulWidget {
 class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStateMixin {
   AnalysisPhase _phase = AnalysisPhase.generating;
   late AnimationController _transitionController;
+  late AnalysisData _data;
+  late DateTime _screenStartTime;
+  DateTime? _resultShowTime;
+
+  // Result tracking
+  bool _isNavigatingBack = false;
 
   // Animation values
   late Animation<double> _imageDissolve;
@@ -27,6 +47,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
   @override
   void initState() {
     super.initState();
+    _screenStartTime = DateTime.now();
+    _data = widget.fallbackData ?? AnalysisData.defaultData;
+    
     _transitionController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 500), // Motion Specs: 500ms
@@ -76,16 +99,34 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
     _transitionController.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
-        setState(() => _phase = AnalysisPhase.complete);
+        setState(() {
+          _phase = AnalysisPhase.complete;
+          _resultShowTime = DateTime.now();
+        });
       }
     });
 
+    if (widget.analysisFuture != null) {
+      widget.analysisFuture!.then((result) {
+        if (mounted) {
+          setState(() {
+            _data = result;
+          });
+          _startTransition();
+        }
+      }).catchError((e) {
+        if (mounted) {
+          final isDebug = dotenv.env['DEBUG_MODE']?.toLowerCase() == 'true';
+          final errorMsg = isDebug ? 'error:$e' : 'error:解析に失敗しました。しばらく待ってからやり直してください。';
+          // エラー時はメッセージを添えてダッシュボードに戻る
+          _navigateToDashboard(result: errorMsg);
+        }
+      });
+    }
+
   }
 
-  void _startTransition() {
-    setState(() => _phase = AnalysisPhase.reveal);
-    _transitionController.forward();
-  }
+  // Removed _initAutoReturnTracking and _startFaceTracking functionality
 
   @override
   void dispose() {
@@ -93,54 +134,70 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
     super.dispose();
   }
 
-  void _navigateToDashboard() {
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder(
-        pageBuilder: (_, _, _) => const DashboardScreen(),
-        transitionDuration: const Duration(milliseconds: 700),
-        reverseTransitionDuration: const Duration(milliseconds: 400),
-        transitionsBuilder: (_, animation, _, child) {
-          final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
-          return FadeTransition(
-            opacity: curved,
-            child: ScaleTransition(
-              scale: Tween<double>(begin: 0.92, end: 1.0).animate(curved),
-              child: child,
-            ),
-          );
-        },
-      ),
-    );
+  void _startTransition() {
+    setState(() => _phase = AnalysisPhase.reveal);
+    _transitionController.forward();
+  }
+
+  Future<void> _navigateToDashboard({dynamic result}) async {
+    if (_isNavigatingBack) return;
+    _isNavigatingBack = true;
+
+    if (mounted) {
+      Navigator.of(context).pop(result);
+    }
   }
 
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () {
-        if (_phase == AnalysisPhase.generating) {
-          _startTransition();
-        } else if (_phase == AnalysisPhase.complete) {
-          _navigateToDashboard();
-        }
-      },
-      child: Scaffold(
-        backgroundColor: Colors.white,
-        body: AnimatedBuilder(
-          animation: _transitionController,
-          builder: (context, child) {
-            return OrientationBuilder(
-              builder: (context, orientation) {
-                if (orientation == Orientation.landscape) {
-                  return _buildLandscapeLayout();
-                } else {
-                  return _buildPortraitLayout();
-                }
-              },
-            );
-          },
-        ),
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: Stack(
+        children: [
+          AnimatedBuilder(
+            animation: _transitionController,
+            builder: (context, child) {
+              return OrientationBuilder(
+                builder: (context, orientation) {
+                  if (orientation == Orientation.landscape) {
+                    return _buildLandscapeLayout();
+                  } else {
+                    return _buildPortraitLayout();
+                  }
+                },
+              );
+            },
+          ),
+          // 右上の「×」ボタン（結果表示またはエラー表示以降に出現）
+          if (_phase == AnalysisPhase.complete || _phase == AnalysisPhase.reveal)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 16,
+              right: 24,
+              child: FadeTransition(
+                opacity: _contentFade,
+                child: GestureDetector(
+                  onTap: () => _navigateToDashboard(),
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.9),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.1),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        )
+                      ],
+                    ),
+                    child: const Icon(Icons.close, color: AppColors.textPrimary, size: 24),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -201,10 +258,35 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
 
   Widget _buildStaticImageArea() {
+    final polygon = _data.polygon;
+    double aspectRatio = 16 / 9;
+    if (polygon != null && polygon.length >= 4) {
+      double minX = 1000, minY = 1000, maxX = 0, maxY = 0;
+      for (int i = 0; i < polygon.length - 1; i += 2) {
+        final y = polygon[i];
+        final x = polygon[i + 1];
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+      
+      final w = (maxX - minX).clamp(1.0, 1000.0);
+      final h = (maxY - minY).clamp(1.0, 1000.0);
+      
+      if (h > w * 1.2) {
+        aspectRatio = 3 / 4; // 縦長
+      } else if (w > h * 1.2) {
+        aspectRatio = 16 / 9; // 横長
+      } else {
+        aspectRatio = 1.0; // 正方形に近い
+      }
+    }
+
     return Padding(
       padding: const EdgeInsets.all(24.0),
       child: AspectRatio(
-        aspectRatio: 16 / 9,
+        aspectRatio: aspectRatio,
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(32),
@@ -252,7 +334,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      _buildImageWithFallback(),
+                      _buildImageWithCrop(),
                       Positioned.fill(
                         child: DecoratedBox(
                           decoration: BoxDecoration(
@@ -337,61 +419,63 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
               ),
             ],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildTagRow("AI ANALYSIS IN PROGRESS"),
-              const SizedBox(height: 12),
-              
-              SlideTransition(
-                position: _titleSlideOut,
-                child: const Text(
-                  "Generating...",
-                  style: TextStyle(
-                    fontSize: 34,
-                    fontWeight: FontWeight.w900,
-                    color: AppColors.textPrimary,
-                    letterSpacing: -0.5,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildTagRow("AI ANALYSIS IN PROGRESS"),
+                const SizedBox(height: 12),
+                
+                SlideTransition(
+                  position: _titleSlideOut,
+                  child: const Text(
+                    "Generating...",
+                    style: TextStyle(
+                      fontSize: 34,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.textPrimary,
+                      letterSpacing: -0.5,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
-
-              FadeTransition(
-                opacity: _skeletonFade,
-                child: Shimmer.fromColors(
-                  baseColor: Colors.grey.shade200,
-                  highlightColor: Colors.grey.shade50,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildShimmerContainer(width: 180, height: 16, circular: true),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Icon(Icons.calendar_today, size: 14, color: Colors.grey.shade300),
-                          const SizedBox(width: 8),
-                          _buildShimmerContainer(width: 120, height: 14, circular: true),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      _buildShimmerContainer(width: double.infinity, height: 12, circular: true),
-                      const SizedBox(height: 8),
-                      _buildShimmerContainer(width: double.infinity, height: 12, circular: true),
-                      const SizedBox(height: 8),
-                      _buildShimmerContainer(width: double.infinity, height: 12, circular: true),
-                      const SizedBox(height: 8),
-                      _buildShimmerContainer(width: 180, height: 12, circular: true),
-                    ],
+                const SizedBox(height: 16),
+  
+                FadeTransition(
+                  opacity: _skeletonFade,
+                  child: Shimmer.fromColors(
+                    baseColor: Colors.grey.shade200,
+                    highlightColor: Colors.grey.shade50,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildShimmerContainer(width: 180, height: 16, circular: true),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Icon(Icons.calendar_today, size: 14, color: Colors.grey.shade300),
+                            const SizedBox(width: 8),
+                            _buildShimmerContainer(width: 120, height: 14, circular: true),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        _buildShimmerContainer(width: double.infinity, height: 12, circular: true),
+                        const SizedBox(height: 8),
+                        _buildShimmerContainer(width: double.infinity, height: 12, circular: true),
+                        const SizedBox(height: 8),
+                        _buildShimmerContainer(width: double.infinity, height: 12, circular: true),
+                        const SizedBox(height: 8),
+                        _buildShimmerContainer(width: 180, height: 12, circular: true),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 24),
-
-              if (!isLandscape) const Spacer() else const SizedBox(height: 48),
-
-              _buildOutlineButtons(),
-            ],
+                const SizedBox(height: 24),
+  
+                const SizedBox(height: 48),
+  
+                _buildOutlineButtons(),
+              ],
+            ),
           ),
         ),
       ),
@@ -476,15 +560,53 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
   }
 
 
-  Widget _buildImageWithFallback() {
-    return Image.asset(
-      'assets/brewery.png',
-      fit: BoxFit.cover,
-      errorBuilder: (context, error, stackTrace) {
-        return Container(
-          color: Colors.grey.shade300,
-          child: const Center(
-            child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
+  Widget _buildImageWithCrop() {
+    final polygon = _data.polygon;
+    final imagePath = _data.imagePath;
+    final ImageProvider imageProvider = imagePath.startsWith('assets/') ? AssetImage(imagePath) : FileImage(File(imagePath));
+
+    if (polygon == null || polygon.length < 4) {
+      return Image(image: imageProvider, fit: BoxFit.cover);
+    }
+
+    // 境界矩形の計算 (Geminiの座標は 0~1000 の範囲 [ymin, xmin, ymax, xmax] など)
+    double minX = 1000, minY = 1000, maxX = 0, maxY = 0;
+    for (int i = 0; i < polygon.length - 1; i += 2) {
+      final y = polygon[i];
+      final x = polygon[i + 1];
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+
+    // 対象物の中心座標(0.0〜1.0)
+    final cx = (minX + maxX) / 2 / 1000;
+    final cy = (minY + maxY) / 2 / 1000;
+
+    // 対象物の幅と高さ(0.0〜1.0)
+    final w = (maxX - minX) / 1000;
+    final h = (maxY - minY) / 1000;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 対象物が画面の約75%を占めるようにズーム率を計算（大きすぎ・小さすぎを防ぐため 1.0〜4.0 倍に制限）
+        final zoomScale = (0.75 / math.max(0.1, math.max(w, h))).clamp(1.0, 4.0);
+
+        // FractionalOffset を使うことで、BoxFit.cover でどれだけ切り取られても、
+        // 対象物の中心 (cx, cy) がコンテナの (cx, cy) 位置に確実に配置されます。
+        // Transform.scale により、その (cx, cy) を中心としてズームされるため、画面から見切れることがありません。
+        final alignment = FractionalOffset(cx, cy);
+
+        return ClipRect(
+          child: Transform.scale(
+            scale: zoomScale,
+            alignment: alignment,
+            child: Image(
+              image: imageProvider,
+              fit: BoxFit.cover,
+              alignment: alignment,
+            ),
           ),
         );
       },
@@ -517,9 +639,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
                 color: const Color(0xFFFFFAD6),
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: const Text(
-                "HISTORICAL SITE",
-                style: TextStyle(
+              child: Text(
+                _data.tag,
+                style: const TextStyle(
                   color: Color(0xFFAC8B18),
                   fontWeight: FontWeight.w800,
                   fontSize: 11,
@@ -532,9 +654,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
             // Title
             SlideTransition(
               position: _titleSlideIn,
-              child: const Text(
-                "Traditional Soy Sauce Brewery",
-                style: TextStyle(
+              child: Text(
+                _data.title,
+                style: const TextStyle(
                   fontSize: 34,
                   fontWeight: FontWeight.w900,
                   color: AppColors.textPrimary,
@@ -549,10 +671,10 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
             children: [
               Icon(Icons.calendar_today, size: 16, color: const Color(0xFF52A574)),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  "Built 1920 • 0.2 miles away",
-                  style: TextStyle(
+                  _data.subtitle,
+                  style: const TextStyle(
                     color: Color(0xFF52A574), // Greenish
                     fontWeight: FontWeight.bold,
                     fontSize: 14,
@@ -564,9 +686,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
             const SizedBox(height: 24),
       
             // Description
-            const Text(
-              "A preserved historical brewery showcasing traditional fermentation methods and architectural heritage from the early 20th century. Experience the authentic brewing process of artisanal soy sauce.",
-              style: TextStyle(
+            Text(
+              _data.description,
+              style: const TextStyle(
                 color: Color(0xFF5C626C),
                 fontSize: 15,
                 height: 1.6,

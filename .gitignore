@@ -1,3 +1,5 @@
 /backend/model
 /backend/__pycache__
 .env
+/frontend/flutter_application_screen/linux
+/frontend/flutter_application_screen/macos
