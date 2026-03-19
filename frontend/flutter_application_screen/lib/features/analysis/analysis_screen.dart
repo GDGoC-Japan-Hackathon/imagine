@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../dashboard/dashboard_screen.dart';
 import 'analysis_model.dart';
 import '../../core/theme/app_colors.dart';
+import 'dart:math' as math;
 import 'dart:async';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
@@ -150,43 +151,53 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () {
-        // 全体の経過時間（念のためのセーフガード）
-        final screenElapsed = DateTime.now().difference(_screenStartTime).inSeconds;
-        // 結果表示からの経過時間
-        final resultElapsed = _resultShowTime != null 
-            ? DateTime.now().difference(_resultShowTime!).inSeconds 
-            : 0;
-
-        if (screenElapsed >= 15 || resultElapsed >= 5) {
-          _navigateToDashboard();
-          return;
-        }
-
-        if (_phase == AnalysisPhase.generating && widget.analysisFuture == null) {
-          _startTransition();
-        } else if (_phase == AnalysisPhase.complete) {
-          _navigateToDashboard();
-        }
-      },
-      child: Scaffold(
-        backgroundColor: Colors.white,
-        body: AnimatedBuilder(
-          animation: _transitionController,
-          builder: (context, child) {
-            return OrientationBuilder(
-              builder: (context, orientation) {
-                if (orientation == Orientation.landscape) {
-                  return _buildLandscapeLayout();
-                } else {
-                  return _buildPortraitLayout();
-                }
-              },
-            );
-          },
-        ),
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: Stack(
+        children: [
+          AnimatedBuilder(
+            animation: _transitionController,
+            builder: (context, child) {
+              return OrientationBuilder(
+                builder: (context, orientation) {
+                  if (orientation == Orientation.landscape) {
+                    return _buildLandscapeLayout();
+                  } else {
+                    return _buildPortraitLayout();
+                  }
+                },
+              );
+            },
+          ),
+          // 右上の「×」ボタン（結果表示またはエラー表示以降に出現）
+          if (_phase == AnalysisPhase.complete || _phase == AnalysisPhase.reveal)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 16,
+              right: 24,
+              child: FadeTransition(
+                opacity: _contentFade,
+                child: GestureDetector(
+                  onTap: () => _navigateToDashboard(),
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.9),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.1),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        )
+                      ],
+                    ),
+                    child: const Icon(Icons.close, color: AppColors.textPrimary, size: 24),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -259,8 +270,16 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
         if (y < minY) minY = y;
         if (y > maxY) maxY = y;
       }
-      if ((maxY - minY) > (maxX - minX)) {
-        aspectRatio = 3 / 4;
+      
+      final w = (maxX - minX).clamp(1.0, 1000.0);
+      final h = (maxY - minY).clamp(1.0, 1000.0);
+      
+      if (h > w * 1.2) {
+        aspectRatio = 3 / 4; // 縦長
+      } else if (w > h * 1.2) {
+        aspectRatio = 16 / 9; // 横長
+      } else {
+        aspectRatio = 1.0; // 正方形に近い
       }
     }
 
@@ -550,7 +569,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
       return Image(image: imageProvider, fit: BoxFit.cover);
     }
 
-    // 境界矩形の計算 (Geminiの座標は 0~1000 の範囲 [y1, x1, y2, x2, ...])
+    // 境界矩形の計算 (Geminiの座標は 0~1000 の範囲 [ymin, xmin, ymax, xmax] など)
     double minX = 1000, minY = 1000, maxX = 0, maxY = 0;
     for (int i = 0; i < polygon.length - 1; i += 2) {
       final y = polygon[i];
@@ -561,31 +580,32 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
       if (y > maxY) maxY = y;
     }
 
-    // マージンを追加 (少し周囲を見せる)
-    const margin = 50.0;
-    minX = (minX - margin).clamp(0, 1000);
-    minY = (minY - margin).clamp(0, 1000);
-    maxX = (maxX + margin).clamp(0, 1000);
-    maxY = (maxY + margin).clamp(0, 1000);
+    // 対象物の中心座標(0.0〜1.0)
+    final cx = (minX + maxX) / 2 / 1000;
+    final cy = (minY + maxY) / 2 / 1000;
 
-    final left = minX / 1000;
-    final top = minY / 1000;
-    final width = (maxX - minX) / 1000;
-    final height = (maxY - minY) / 1000;
+    // 対象物の幅と高さ(0.0〜1.0)
+    final w = (maxX - minX) / 1000;
+    final h = (maxY - minY) / 1000;
 
     return LayoutBuilder(
       builder: (context, constraints) {
+        // 対象物が画面の約75%を占めるようにズーム率を計算（大きすぎ・小さすぎを防ぐため 1.0〜4.0 倍に制限）
+        final zoomScale = (0.75 / math.max(0.1, math.max(w, h))).clamp(1.0, 4.0);
+
+        // FractionalOffset を使うことで、BoxFit.cover でどれだけ切り取られても、
+        // 対象物の中心 (cx, cy) がコンテナの (cx, cy) 位置に確実に配置されます。
+        // Transform.scale により、その (cx, cy) を中心としてズームされるため、画面から見切れることがありません。
+        final alignment = FractionalOffset(cx, cy);
+
         return ClipRect(
-          child: FractionallySizedBox(
-            widthFactor: 1.0 / (width > 0 ? width : 1.0),
-            heightFactor: 1.0 / (height > 0 ? height : 1.0),
-            alignment: FractionalOffset(
-              width < 1.0 ? left / (1.0 - width) : 0.5,
-              height < 1.0 ? top / (1.0 - height) : 0.5,
-            ),
+          child: Transform.scale(
+            scale: zoomScale,
+            alignment: alignment,
             child: Image(
               image: imageProvider,
-              fit: BoxFit.fill,
+              fit: BoxFit.cover,
+              alignment: alignment,
             ),
           ),
         );
