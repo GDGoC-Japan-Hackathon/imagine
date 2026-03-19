@@ -51,6 +51,18 @@ class MediapipeService {
     }
   }
 
+  Future<void> detectJpeg(Uint8List jpegBytes, {bool isFront = true, int rotation = 0}) async {
+    try {
+      await _methodChannel.invokeMethod('detectJpeg', {
+        'jpeg': jpegBytes,
+        'isFront': isFront,
+        'rotation': rotation,
+      });
+    } on PlatformException catch (e) {
+      print("MediaPipe Detection error: ${e.message}");
+    }
+  }
+
   Future<void> close() async {
     await _methodChannel.invokeMethod('close');
   }

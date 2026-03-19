@@ -1,6 +1,11 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 class CameraService {
   static final CameraService _instance = CameraService._internal();
@@ -13,6 +18,11 @@ class CameraService {
   CameraController? inCameraController;
   CameraController? outCameraController;
   List<CameraDescription> _cameras = [];
+
+  bool isNetworkMode = false;
+  WebSocketChannel? _networkChannel;
+  StreamController<Uint8List>? _networkStreamController;
+  Stream<Uint8List>? get networkImageStream => _networkStreamController?.stream;
 
   Future<void> initialize({bool force = false}) async {
     // 既に初期化されており、強制再起動でない場合はスキップ
@@ -32,7 +42,15 @@ class CameraService {
     }
     print("=============================");
 
-    if (_cameras.isEmpty) return;
+    if (_cameras.isEmpty) {
+      print("No cameras found. Falling back to Network WebSocket Mode.");
+      isNetworkMode = true;
+      _networkStreamController = StreamController<Uint8List>.broadcast();
+      _connectToRelay();
+      return;
+    }
+    
+    isNetworkMode = false;
     
     try {
       _isAutomotiveCache = await _channel.invokeMethod('isAutomotiveOS') ?? false;
@@ -90,6 +108,33 @@ class CameraService {
 
   /// アウトカメラで静止画を撮影
   Future<XFile?> captureOutCameraImage() async {
+    if (isNetworkMode) {
+      if (_networkChannel != null && _networkStreamController != null) {
+        try {
+          // Switch to back camera
+          _networkChannel!.sink.add(jsonEncode({"command": "switch_camera", "lensDirection": "back"}));
+          // Wait briefly for camera hardware to physically switch on streamer app
+          await Future.delayed(const Duration(milliseconds: 1500));
+          
+          final jpegBytes = await networkImageStream!.first.timeout(const Duration(seconds: 4));
+          final tempDir = await getTemporaryDirectory();
+          final file = File('${tempDir.path}/out_network_${DateTime.now().millisecondsSinceEpoch}.jpg');
+          await file.writeAsBytes(jpegBytes);
+          
+          // Switch back to front camera for face tracking
+          _networkChannel!.sink.add(jsonEncode({"command": "switch_camera", "lensDirection": "front"}));
+          
+          return XFile(file.path);
+        } catch (e) {
+          print("Failed to capture network image: $e");
+          // Attempt to restore front camera even on error
+          _networkChannel?.sink.add(jsonEncode({"command": "switch_camera", "lensDirection": "front"}));
+          return null;
+        }
+      }
+      return null;
+    }
+
     // 1. Androidデュアルカメラ仕様の問題（リアがフロントを上書きする現象）を防ぐため、
     // まず完全にフロントカメラ（インカメラ）を破棄し、ハードウェアロックを解除します。
     if (inCameraController != null) {
@@ -170,6 +215,27 @@ class CameraService {
     return capturedImage;
   }
 
+  void _connectToRelay() {
+    final url = dotenv.env['RELAY_WS_URL'] ?? 'ws://127.0.0.1:8080';
+    try {
+      _networkChannel = WebSocketChannel.connect(Uri.parse(url));
+      // Start with front camera for face tracking
+      _networkChannel!.sink.add(jsonEncode({"command": "switch_camera", "lensDirection": "front"}));
+      
+      _networkChannel!.stream.listen((message) {
+        if (message is Uint8List) {
+          _networkStreamController?.add(message);
+        }
+      }, onDone: () {
+        print("Network camera disconnected.");
+      }, onError: (e) {
+        print("Network camera error: $e");
+      });
+    } catch (e) {
+      print("Failed to connect to network relay: $e");
+    }
+  }
+
   Future<void> dispose() async {
     try {
       if (inCameraController != null) {
@@ -190,5 +256,10 @@ class CameraService {
     } finally {
       outCameraController = null;
     }
+
+    _networkChannel?.sink.close();
+    _networkChannel = null;
+    await _networkStreamController?.close();
+    _networkStreamController = null;
   }
 }

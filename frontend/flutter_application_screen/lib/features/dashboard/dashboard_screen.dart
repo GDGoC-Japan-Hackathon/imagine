@@ -14,7 +14,6 @@ import '../camera/models/face_vector.dart';
 import '../camera/services/camera_service.dart';
 import '../camera/services/face_tracker_service.dart';
 import '../camera/services/gemini_service.dart';
-import '../camera/services/gemini_service.dart';
 import '../camera/services/mediapipe_service.dart';
 import '../camera/models/test_scenery.dart';
 
@@ -34,6 +33,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   final MediapipeService _mediapipeService = MediapipeService();
   
   StreamSubscription? _faceSubscription;
+  StreamSubscription<Uint8List>? _networkImageSubscription;
 
   bool _isProcessing = false;
   bool _skipFaceDetection = false;
@@ -81,7 +81,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     try {
       if (_isCameraStreaming) {
         _isCameraStreaming = false;
-        await _cameraService.inCameraController?.stopImageStream();
+        if (!_cameraService.isNetworkMode) {
+          await _cameraService.inCameraController?.stopImageStream();
+        } else {
+          await _networkImageSubscription?.cancel();
+        }
       }
       await _cameraService.dispose();
       _isCameraInitialized = false;
@@ -147,8 +151,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   }
 
   void _startFaceTracking() {
-    if (_cameraService.inCameraController == null) return;
-    if (_cameraService.inCameraController!.value.isStreamingImages) return;
+    if (_cameraService.isNetworkMode) {
+      if (_cameraService.networkImageStream == null) return;
+    } else {
+      if (_cameraService.inCameraController == null) return;
+      if (_cameraService.inCameraController!.value.isStreamingImages) return;
+    }
 
     // MediaPipe からのストリームを購読
     _faceSubscription = _mediapipeService.faceStream.listen((data) {
@@ -266,25 +274,44 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       if (_isCameraStreaming) return;
       _isCameraStreaming = true;
       
-      _cameraService.inCameraController?.startImageStream((CameraImage image) {
-        if (_isProcessing || _isAnalyzing || !mounted || !_isCameraStreaming) return;
-        
-        final now = DateTime.now();
-        // 負荷軽減のため処理間隔を空ける (精度向上のため100ms→30msへ短縮)
-        if (now.difference(_lastAnalysisTime).inMilliseconds < 30) return;
+      if (_cameraService.isNetworkMode) {
+        _networkImageSubscription = _cameraService.networkImageStream?.listen((Uint8List jpegBytes) {
+          if (_isProcessing || _isAnalyzing || !mounted || !_isCameraStreaming) return;
+          
+          final now = DateTime.now();
+          if (now.difference(_lastAnalysisTime).inMilliseconds < 30) return;
 
-        _isAnalyzing = true;
-        _lastAnalysisTime = now;
+          _isAnalyzing = true;
+          _lastAnalysisTime = now;
 
-        // MediaPipe (Native) へ送信
-        final rotation = _cameraService.inCameraController?.description.sensorOrientation ?? 0;
-        _mediapipeService.detect(image, isFront: true, rotation: rotation).then((_) {
-          _isAnalyzing = false;
-        }).catchError((e) {
-          _isAnalyzing = false;
-          debugPrint("MediaPipe detection error: $e");
+          _mediapipeService.detectJpeg(jpegBytes, isFront: true, rotation: 0).then((_) {
+            _isAnalyzing = false;
+          }).catchError((e) {
+            _isAnalyzing = false;
+            debugPrint("MediaPipe network detection error: $e");
+          });
         });
-      });
+      } else {
+        _cameraService.inCameraController?.startImageStream((CameraImage image) {
+          if (_isProcessing || _isAnalyzing || !mounted || !_isCameraStreaming) return;
+          
+          final now = DateTime.now();
+          // 負荷軽減のため処理間隔を空ける (精度向上のため100ms→30msへ短縮)
+          if (now.difference(_lastAnalysisTime).inMilliseconds < 30) return;
+
+          _isAnalyzing = true;
+          _lastAnalysisTime = now;
+
+          // MediaPipe (Native) へ送信
+          final rotation = _cameraService.inCameraController?.description.sensorOrientation ?? 0;
+          _mediapipeService.detect(image, isFront: true, rotation: rotation).then((_) {
+            _isAnalyzing = false;
+          }).catchError((e) {
+            _isAnalyzing = false;
+            debugPrint("MediaPipe detection error: $e");
+          });
+        });
+      }
     } catch (e) {
       _isCameraStreaming = false;
       debugPrint("Error starting image stream: $e");
@@ -301,10 +328,14 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   Future<void> _captureAndHandleTransition(FaceVector targetVector) async {
     // 1. まずインカメラのストリームを止める
     try {
-      if (_isCameraStreaming && _cameraService.inCameraController != null) {
+      if (_isCameraStreaming) {
         _isCameraStreaming = false;
-        if (_cameraService.inCameraController!.value.isStreamingImages) {
-          await _cameraService.inCameraController?.stopImageStream();
+        if (!_cameraService.isNetworkMode && _cameraService.inCameraController != null) {
+          if (_cameraService.inCameraController!.value.isStreamingImages) {
+            await _cameraService.inCameraController?.stopImageStream();
+          }
+        } else if (_cameraService.isNetworkMode) {
+          await _networkImageSubscription?.cancel();
         }
         // 分析画面へ移る際、顔検出機能を明示的に一時停止（クローズ）する
         await _mediapipeService.close();
