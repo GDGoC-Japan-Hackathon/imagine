@@ -165,10 +165,58 @@ class MainActivity : FlutterActivity() {
                             result.error("INVALID_ARGS", "Missing data", null)
                         }
                     }
+                    "detectJpeg" -> {
+                        val jpegBytes = call.argument<ByteArray>("jpeg")
+                        val isFront = call.argument<Boolean>("isFront") ?: true
+                        val rotation = call.argument<Int>("rotation") ?: 0
+                        
+                        if (jpegBytes != null && faceLandmarkerHelper != null) {
+                            val originalBitmap = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size)
+                            if (originalBitmap != null) {
+                                var processedBitmap = resizeBitmap(originalBitmap, 640)
+                                processedBitmap = adjustBrightness(processedBitmap, 25)
+                                processedBitmap = applyGammaCorrection(processedBitmap, 1.2f)
+                                faceLandmarkerHelper?.detectLiveStream(processedBitmap, isFront, rotation)
+                                result.success(true)
+                            } else {
+                                result.error("DECODE_ERROR", "Failed to decode JPEG", null)
+                            }
+                        } else {
+                            result.error("INVALID_ARGS", "Missing data", null)
+                        }
+                    }
+                    "compressYuvToJpeg" -> {
+                        val y = call.argument<ByteArray>("y")
+                        val u = call.argument<ByteArray>("u")
+                        val v = call.argument<ByteArray>("v")
+                        val yRowStride = call.argument<Int>("yRowStride") ?: 0
+                        val uvRowStride = call.argument<Int>("uvRowStride") ?: 0
+                        val uvPixelStride = call.argument<Int>("uvPixelStride") ?: 1
+                        val width = call.argument<Int>("width") ?: 0
+                        val height = call.argument<Int>("height") ?: 0
+                        
+                        if (y != null && u != null && v != null) {
+                            try {
+                                val nv21 = yuv420ThreePlanesToNV21(y, u, v, width, height, yRowStride, uvRowStride, uvPixelStride)
+                                val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
+                                val stream = ByteArrayOutputStream()
+                                yuvImage.compressToJpeg(Rect(0, 0, width, height), 60, stream)
+                                result.success(stream.toByteArray())
+                            } catch (e: Exception) {
+                                result.error("COMPRESS_ERROR", e.message, null)
+                            }
+                        } else {
+                            result.error("INVALID_ARGS", "Missing YUV data", null)
+                        }
+                    }
                     "close" -> {
                         faceLandmarkerHelper?.close()
                         faceLandmarkerHelper = null
                         result.success(true)
+                    }
+                    "isAutomotiveOS" -> {
+                        val isAutomotive = packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_AUTOMOTIVE)
+                        result.success(isAutomotive)
                     }
                     else -> result.notImplemented()
                 }
@@ -217,6 +265,36 @@ class MainActivity : FlutterActivity() {
             Log.e("MediaPipe", "YUV Conversion failed: ${e.message}")
             null
         }
+    }
+
+    private fun yuv420ThreePlanesToNV21(
+        yPlane: ByteArray, uPlane: ByteArray, vPlane: ByteArray,
+        width: Int, height: Int,
+        yRowStride: Int, uvRowStride: Int, uvPixelStride: Int
+    ): ByteArray {
+        val nv21 = ByteArray(width * height * 3 / 2)
+        var pos = 0
+        
+        // Copy Y
+        for (row in 0 until height) {
+            val length = minOf(width, yPlane.size - row * yRowStride)
+            System.arraycopy(yPlane, row * yRowStride, nv21, pos, length)
+            pos += width
+        }
+        
+        // Copy V and U
+        for (row in 0 until height / 2) {
+            for (col in 0 until width / 2) {
+                val vuPos = (row * uvRowStride) + (col * uvPixelStride)
+                if (vuPos < vPlane.size && pos < nv21.size) {
+                    nv21[pos++] = vPlane[vuPos]
+                } else { pos++ }
+                if (vuPos < uPlane.size && pos < nv21.size) {
+                    nv21[pos++] = uPlane[vuPos]
+                } else { pos++ }
+            }
+        }
+        return nv21
     }
 
     // ビットマップを指定された最大サイズにリサイズ

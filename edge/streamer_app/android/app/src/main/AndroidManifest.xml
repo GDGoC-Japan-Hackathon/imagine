@@ -1,11 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- カメラアクセス権限 -->
     <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    
-    <uses-feature
-        android:name="android.hardware.type.automotive"
-        android:required="false" />
+    <!-- WebSocket によるリレーサーバーへの通信権限 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- カメラ機能の宣言（required=false でカメラなし端末でもインストール可能） -->
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
@@ -14,11 +13,10 @@
         android:required="false" />
 
     <application
-        android:label="flutter_application_screen"
+        android:label="Imagine Streamer"
         android:name="${applicationName}"
-        android:extractNativeLibs="true"
-        android:enableOnBackInvokedCallback="true"
-        android:icon="@mipmap/launcher_icon">
+        android:icon="@mipmap/ic_launcher">
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

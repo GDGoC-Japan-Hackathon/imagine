@@ -7,13 +7,11 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../common_widgets/glowing_orb.dart';
-import '../../common_widgets/primary_button.dart';
 import '../analysis/analysis_screen.dart';
 import '../analysis/analysis_model.dart';
 import '../camera/models/face_vector.dart';
 import '../camera/services/camera_service.dart';
 import '../camera/services/face_tracker_service.dart';
-import '../camera/services/gemini_service.dart';
 import '../camera/services/gemini_service.dart';
 import '../camera/services/mediapipe_service.dart';
 import '../camera/models/test_scenery.dart';
@@ -34,6 +32,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   final MediapipeService _mediapipeService = MediapipeService();
   
   StreamSubscription? _faceSubscription;
+  StreamSubscription<Uint8List>? _networkImageSubscription;
 
   bool _isProcessing = false;
   bool _skipFaceDetection = false;
@@ -48,7 +47,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   DateTime _lastAnalysisTime = DateTime.now();
   DateTime _lastFaceDetectedTime = DateTime.now();
   bool _hasFaceInFrame = false;
-  Rect? _detectedFaceRect;
   bool _isCameraStreaming = false;
   bool _isCameraInitialized = false;
   bool _didPlayStableSound = false;
@@ -62,7 +60,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final CameraController? cameraController = _cameraService.inCameraController;
 
     // アプリがバックグラウンドに回った、またはスリープした際の処理
     if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
@@ -81,7 +78,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     try {
       if (_isCameraStreaming) {
         _isCameraStreaming = false;
-        await _cameraService.inCameraController?.stopImageStream();
+        if (!_cameraService.isNetworkMode) {
+          await _cameraService.inCameraController?.stopImageStream();
+        } else {
+          await _networkImageSubscription?.cancel();
+        }
       }
       await _cameraService.dispose();
       _isCameraInitialized = false;
@@ -147,8 +148,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   }
 
   void _startFaceTracking() {
-    if (_cameraService.inCameraController == null) return;
-    if (_cameraService.inCameraController!.value.isStreamingImages) return;
+    if (_cameraService.isNetworkMode) {
+      if (_cameraService.networkImageStream == null) return;
+    } else {
+      if (_cameraService.inCameraController == null) return;
+      if (_cameraService.inCameraController!.value.isStreamingImages) return;
+    }
 
     // MediaPipe からのストリームを購読
     _faceSubscription = _mediapipeService.faceStream.listen((data) {
@@ -172,7 +177,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           if (mounted) {
             setState(() {
               _hasFaceInFrame = false;
-              _detectedFaceRect = null;
             });
             _orbKey.currentState?.setTracking(false);
             _orbKey.currentState?.setFaceOffset(null);
@@ -266,25 +270,44 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       if (_isCameraStreaming) return;
       _isCameraStreaming = true;
       
-      _cameraService.inCameraController?.startImageStream((CameraImage image) {
-        if (_isProcessing || _isAnalyzing || !mounted || !_isCameraStreaming) return;
-        
-        final now = DateTime.now();
-        // 負荷軽減のため処理間隔を空ける (精度向上のため100ms→30msへ短縮)
-        if (now.difference(_lastAnalysisTime).inMilliseconds < 30) return;
+      if (_cameraService.isNetworkMode) {
+        _networkImageSubscription = _cameraService.networkImageStream?.listen((Uint8List jpegBytes) {
+          if (_isProcessing || _isAnalyzing || !mounted || !_isCameraStreaming) return;
+          
+          final now = DateTime.now();
+          if (now.difference(_lastAnalysisTime).inMilliseconds < 30) return;
 
-        _isAnalyzing = true;
-        _lastAnalysisTime = now;
+          _isAnalyzing = true;
+          _lastAnalysisTime = now;
 
-        // MediaPipe (Native) へ送信
-        final rotation = _cameraService.inCameraController?.description.sensorOrientation ?? 0;
-        _mediapipeService.detect(image, isFront: true, rotation: rotation).then((_) {
-          _isAnalyzing = false;
-        }).catchError((e) {
-          _isAnalyzing = false;
-          debugPrint("MediaPipe detection error: $e");
+          _mediapipeService.detectJpeg(jpegBytes, isFront: true, rotation: 0).then((_) {
+            _isAnalyzing = false;
+          }).catchError((e) {
+            _isAnalyzing = false;
+            debugPrint("MediaPipe network detection error: $e");
+          });
         });
-      });
+      } else {
+        _cameraService.inCameraController?.startImageStream((CameraImage image) {
+          if (_isProcessing || _isAnalyzing || !mounted || !_isCameraStreaming) return;
+          
+          final now = DateTime.now();
+          // 負荷軽減のため処理間隔を空ける (精度向上のため100ms→30msへ短縮)
+          if (now.difference(_lastAnalysisTime).inMilliseconds < 30) return;
+
+          _isAnalyzing = true;
+          _lastAnalysisTime = now;
+
+          // MediaPipe (Native) へ送信
+          final rotation = _cameraService.inCameraController?.description.sensorOrientation ?? 0;
+          _mediapipeService.detect(image, isFront: true, rotation: rotation).then((_) {
+            _isAnalyzing = false;
+          }).catchError((e) {
+            _isAnalyzing = false;
+            debugPrint("MediaPipe detection error: $e");
+          });
+        });
+      }
     } catch (e) {
       _isCameraStreaming = false;
       debugPrint("Error starting image stream: $e");
@@ -301,10 +324,14 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   Future<void> _captureAndHandleTransition(FaceVector targetVector) async {
     // 1. まずインカメラのストリームを止める
     try {
-      if (_isCameraStreaming && _cameraService.inCameraController != null) {
+      if (_isCameraStreaming) {
         _isCameraStreaming = false;
-        if (_cameraService.inCameraController!.value.isStreamingImages) {
-          await _cameraService.inCameraController?.stopImageStream();
+        if (!_cameraService.isNetworkMode && _cameraService.inCameraController != null) {
+          if (_cameraService.inCameraController!.value.isStreamingImages) {
+            await _cameraService.inCameraController?.stopImageStream();
+          }
+        } else if (_cameraService.isNetworkMode) {
+          await _networkImageSubscription?.cancel();
         }
         // 分析画面へ移る際、顔検出機能を明示的に一時停止（クローズ）する
         await _mediapipeService.close();
@@ -359,7 +386,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       _isProcessing = false;
       _didPlayStableSound = false;
       _hasFaceInFrame = false;
-      _detectedFaceRect = null;
     });
     _faceTracker.reset();
     _orbKey.currentState?.setTracking(false);
@@ -376,12 +402,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         content: Container(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           decoration: BoxDecoration(
-            color: const Color(0xFF2C3E50).withOpacity(0.9),
+            color: const Color(0xFF2C3E50).withValues(alpha: 0.9),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: Colors.white10, width: 1),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.2),
+                color: Colors.black.withValues(alpha: 0.2),
                 blurRadius: 20,
                 offset: const Offset(0, 10),
               ),
@@ -402,7 +428,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                     ),
                     Text(
                       message,
-                      style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12),
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 12),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -430,7 +456,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       outImage = XFile(tempFile.path);
       effectiveVector = testScenery.targetVector;
       
-      print("DEBUG_MODE: Using test asset ${testScenery.assetPath} at ${effectiveVector.x}, ${effectiveVector.y}");
+      debugPrint("DEBUG_MODE: Using test asset ${testScenery.assetPath} at ${effectiveVector.x}, ${effectiveVector.y}");
     } else {
       outImage = preCapturedImage ?? await _cameraService.captureOutCameraImage();
     }
@@ -472,26 +498,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     super.dispose();
   }
 
-  void _navigateToGenerating() {
-    // Navigate to the generating screen when asked manually
-    Navigator.of(context).push(
-      PageRouteBuilder(
-        pageBuilder: (_, _, _) => const AnalysisScreen(),
-        transitionDuration: const Duration(milliseconds: 600),
-        reverseTransitionDuration: const Duration(milliseconds: 400),
-        transitionsBuilder: (_, animation, _, child) {
-          return FadeTransition(
-            opacity: CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeInOut,
-            ),
-            child: child,
-          );
-        },
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -523,8 +529,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                   begin: Alignment.centerLeft,
                   end: Alignment.centerRight,
                   colors: [
-                    Colors.black.withOpacity(0.1),
-                    Colors.black.withOpacity(0.4),
+                    Colors.black.withValues(alpha: 0.1),
+                    Colors.black.withValues(alpha: 0.4),
                   ],
                 ),
               ),
@@ -550,7 +556,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         width: 240,
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.7),
+          color: Colors.black.withValues(alpha: 0.7),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.white24),
         ),
@@ -610,35 +616,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     );
   }
 
-  Widget _buildFaceGuidanceOverlay() {
-    return Positioned(
-      top: 40,
-      right: 40,
-      child: Container(
-        width: 120,
-        height: 120,
-        decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.3),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white24, width: 1),
-        ),
-        child: const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.face, color: Color(0xFFE2F063), size: 40),
-              SizedBox(height: 8),
-              Text(
-                "DETECTED",
-                style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildDashboardBody() {
     return Row(
       children: [
@@ -676,7 +653,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                   child: Text(
                     "AI コンシェルジュ",
                     style: TextStyle(
-                      color: Color(0xB3FFFFFF), // Colors.white.withOpacity(0.7)
+                      color: Color(0xB3FFFFFF), // Colors.white.withValues(alpha: 0.7)
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 4.0,
@@ -689,9 +666,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.1),
+                    color: Colors.white.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white.withOpacity(0.1), width: 1),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.1), width: 1),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -720,7 +697,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                                   alignment: Alignment.centerLeft,
                                   children: <Widget>[
                                     ...previousChildren,
-                                    if (currentChild != null) currentChild,
+                                    ?currentChild,
                                   ],
                                 );
                               },

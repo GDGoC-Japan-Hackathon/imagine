@@ -1,5 +1,4 @@
 import 'dart:math' as math;
-import 'package:flutter/foundation.dart';
 import '../models/face_vector.dart';
 
 class FaceTrackerService {
