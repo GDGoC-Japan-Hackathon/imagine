@@ -38,6 +38,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   bool _isProcessing = false;
   bool _skipFaceDetection = false;
   bool _debugMode = false;
+  bool _showDebugCamera = false;
+  bool _showDebugFaceImage = false;
+  Uint8List? _debugFaceImage;
   String _statusMessage = "起動中";
   
   // ユーザーガイド・解析用
@@ -91,15 +94,16 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   Future<void> _initApp({bool force = false}) async {
     try {
       await _cameraService.initialize(force: force);
-      await _mediapipeService.initialize();
       _isCameraInitialized = true;
 
       // APIキーの読み込み (.env ファイルから取得)
       _geminiService.initialize(dotenv.env['GEMINI_API_KEY'] ?? ''); 
       _skipFaceDetection = dotenv.env['SKIP_FACE_DETECTION']?.toLowerCase() == 'true';
       _debugMode = dotenv.env['DEBUG_MODE']?.toLowerCase() == 'true';
+      _showDebugCamera = dotenv.env['DEBUG_SHOW_CAMERA']?.toLowerCase() == 'true';
+      _showDebugFaceImage = dotenv.env['DEBUG_SHOW_FACE_IMAGE']?.toLowerCase() == 'true';
       
-      if (!mounted) return;
+      await _mediapipeService.initialize(debugShowFaceImage: _showDebugFaceImage);
       
       if (_skipFaceDetection) {
         setState(() => _statusMessage = "自動撮影テスト中...");
@@ -151,10 +155,17 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       final rawLandmarks = data['landmarks'] as List?;
       final landmarks = rawLandmarks?.map((e) => Map<String, dynamic>.from(e as Map)).toList();
 
+      // デバッグ用画像の更新
+      if (_showDebugFaceImage && data.containsKey('faceImage')) {
+        setState(() {
+          _debugFaceImage = data['faceImage'] as Uint8List?;
+        });
+      }
+
       if (landmarks == null || landmarks.isEmpty) {
         // 顔ロスト時の猶予処理
         final now = DateTime.now();
-        if (_hasFaceInFrame && now.difference(_lastFaceDetectedTime).inMilliseconds > 1000) {
+        if (_hasFaceInFrame && now.difference(_lastFaceDetectedTime).inMilliseconds > 2000) {
           if (mounted) {
             setState(() {
               _hasFaceInFrame = false;
@@ -180,8 +191,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       final eyeLeft = landmarks[33];
       final eyeRight = landmarks[263];
       
-      // 顔の幅を基準に水平位置を正規化
-      final faceWidth = (eyeRight['x'] - eyeLeft['x']).abs();
+      // 顔の幅をユークリッド距離（直線距離）で計算し、顔が傾いていても正確に幅を取得
+      final dx = eyeRight['x'] - eyeLeft['x'];
+      final dy = eyeRight['y'] - eyeLeft['y'];
+      final faceWidth = math.sqrt(dx * dx + dy * dy);
       if (faceWidth < 0.02) return; // 小さすぎる（遠すぎる）場合はスキップ
 
       final eyeCenterX = (eyeLeft['x'] + eyeRight['x']) / 2;
@@ -215,7 +228,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         _orbKey.currentState?.setBlendshapes(scores);
       }
 
-      if (stableProgress >= 0.8) {
+      if (stableProgress >= 1.0) {
         if (!_didPlayStableSound) {
           _playSuccessFeedback();
           _didPlayStableSound = true;
@@ -232,7 +245,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         // 撮影と遷移
         _captureAndHandleTransition(currentFaceVector);
       } else if (stableProgress > 0) {
-        final progress = (stableProgress / 0.8).clamp(0.0, 1.0);
+        final progress = stableProgress.clamp(0.0, 1.0);
         _orbKey.currentState?.setProgress(progress);
         setState(() {
           _statusMessage = "あなたの視線に寄り添っています...";
@@ -290,6 +303,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         if (_cameraService.inCameraController!.value.isStreamingImages) {
           await _cameraService.inCameraController?.stopImageStream();
         }
+        // 分析画面へ移る際、顔検出機能を明示的に一時停止（クローズ）する
+        await _mediapipeService.close();
       }
     } catch (e) {
       debugPrint("Error stopping image stream: $e");
@@ -510,6 +525,78 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
             SafeArea(
               child: _buildDashboardBody(),
             ),
+            if (_showDebugCamera || _showDebugFaceImage) _buildDebugCameraOverlay(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDebugCameraOverlay() {
+    final controller = _cameraService.inCameraController;
+    if (controller == null || !controller.value.isInitialized) return const SizedBox.shrink();
+
+    return Positioned(
+      top: 20,
+      left: 20,
+      child: Container(
+        width: 240,
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.7),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white24),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_showDebugCamera) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: AspectRatio(
+                  aspectRatio: controller.value.aspectRatio,
+                  child: CameraPreview(controller),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            Text(
+              "FACE: ${_hasFaceInFrame ? 'DETECTED' : 'LOST'}",
+              style: TextStyle(
+                color: _hasFaceInFrame ? const Color(0xFFE2F063) : Colors.redAccent,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            if (_hasFaceInFrame) ...[
+              const SizedBox(height: 4),
+              Text(
+                "STABLE: ${(_faceTracker.currentProgress * 100).toStringAsFixed(1)}%",
+                style: const TextStyle(color: Colors.white, fontSize: 10),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                "LAST: ${_lastFaceDetectedTime.toIso8601String().split('T').last}",
+                style: const TextStyle(color: Colors.white70, fontSize: 10),
+              ),
+            ],
+            if (_showDebugFaceImage && _debugFaceImage != null) ...[
+              const SizedBox(height: 12),
+              const Text(
+                "PROCESSED AI IMAGE:",
+                style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: Image.memory(
+                  _debugFaceImage!,
+                  width: double.infinity,
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ],
           ],
         ),
       ),
