@@ -136,11 +136,12 @@ $locationDesc
       final url = Uri.parse('https://texttospeech.googleapis.com/v1beta1/text:synthesize');
       final Map<String, dynamic> requestBody = {
         "audioConfig": {
-          "audioEncoding": "LINEAR16",
+          "audioEncoding": "MP3",
           "pitch": 0,
           "speakingRate": 1
         },
         "input": {
+          "prompt": "バスの添乗員のような明るくハキハキした声",
           "text": text
         },
         "voice": {
