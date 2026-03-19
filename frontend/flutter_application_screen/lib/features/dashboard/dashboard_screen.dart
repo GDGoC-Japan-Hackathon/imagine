@@ -697,7 +697,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                                   alignment: Alignment.centerLeft,
                                   children: <Widget>[
                                     ...previousChildren,
-                                    if (currentChild != null) currentChild!,
+                                    ?currentChild,
                                   ],
                                 );
                               },
