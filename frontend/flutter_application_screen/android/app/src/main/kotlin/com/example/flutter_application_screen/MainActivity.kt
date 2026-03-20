@@ -30,26 +30,39 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        // スリープ（画面の自動消灯）を防止
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        Log.d("MainActivity", "onCreate started")
+        try {
+            // スリープ（画面の自動消灯）を防止
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            Log.d("MainActivity", "Keep screen on flag added")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error in onCreate: ${e.message}")
+        }
+    }
 
-        flutterEngine?.let { engine ->
+    override fun configureFlutterEngine(flutterEngine: io.flutter.embedding.engine.FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        Log.d("MainActivity", "configureFlutterEngine started")
+
+        try {
             // Event Channel Setup
-            EventChannel(engine.dartExecutor.binaryMessenger, EVENT_CHANNEL).setStreamHandler(
+            EventChannel(flutterEngine.dartExecutor.binaryMessenger, EVENT_CHANNEL).setStreamHandler(
                 object : EventChannel.StreamHandler {
                     override fun onListen(arguments: Any?, sink: EventChannel.EventSink?) {
+                        Log.d("MainActivity", "EventChannel onListen")
                         eventSink = sink
                     }
 
                     override fun onCancel(arguments: Any?) {
+                        Log.d("MainActivity", "EventChannel onCancel")
                         eventSink = null
                     }
                 }
             )
 
             // Flutterから呼び出されるメソッド
-            MethodChannel(engine.dartExecutor.binaryMessenger, METHOD_CHANNEL).setMethodCallHandler { call, result ->
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL).setMethodCallHandler { call, result ->
+                Log.d("MainActivity", "MethodChannel call: ${call.method}")
                 // メソッドごとに処理を分岐
                 when (call.method) {
                     // 初期化処理
@@ -246,6 +259,8 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error in configureFlutterEngine: ${e.message}")
         }
     }
 

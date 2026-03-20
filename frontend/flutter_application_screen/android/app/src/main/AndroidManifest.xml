@@ -27,7 +27,7 @@
     <application
         android:label="flutter_application_screen"
         android:name="${applicationName}"
-        android:extractNativeLibs="true"
+        android:extractNativeLibs="false"
         android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/launcher_icon">
         <activity
@@ -62,6 +62,12 @@
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="${googleMapsApiKey}" />
+
+        <!-- Google Navigation SDK Service -->
+        <service
+            android:name="com.google.android.gms.navigation.NavigationService"
+            android:foregroundServiceType="location"
+            android:exported="false" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
