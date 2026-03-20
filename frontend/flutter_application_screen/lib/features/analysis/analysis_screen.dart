@@ -10,6 +10,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:google_navigation_flutter/google_navigation_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:url_launcher/url_launcher_string.dart';
 
 enum AnalysisPhase { generating, peakPulse, convergence, reveal, complete }
 
@@ -215,24 +216,27 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
     _autoExitTimer?.cancel(); // 安全のためここでもキャンセル
 
     if (_data.latitude == null || _data.longitude == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('ナビゲーション用の座標が取得できていません。')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ナビゲーション用の座標が取得できていません。')),
+        );
+      }
       return;
     }
 
-    // ナビゲーションセッションの初期化
+    // GASが使えない場合などでマップアプリを直接呼び出すための geo スキームを優先
+    final intentUrl = 'geo:${_data.latitude},${_data.longitude}?q=${_data.latitude},${_data.longitude}';
+    final googleNavUrl = 'google.navigation:q=${_data.latitude},${_data.longitude}';
+    
+    // SDK方式を試みる
     try {
       // 0. 位置情報パーミッションの確認
       var status = await Permission.location.status;
       if (!status.isGranted) {
         status = await Permission.location.request();
         if (!status.isGranted) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('ナビゲーションには位置情報の許可が必要です。')),
-            );
-          }
+          // パーミッション拒否時はIntent方式へフォールバック
+          await _launchIntent(intentUrl, googleNavUrl);
           return;
         }
       }
@@ -243,12 +247,19 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
           'Google Maps Navigation SDK 利用規約',
           'ナビゲーション機能を利用するには、Google Maps Platform の利用規約に同意する必要があります。',
         );
-        if (!accepted) return;
+        if (!accepted) {
+          // 利用規約に同意しない場合は、Intent方式へフォールバック
+          await _launchIntent(intentUrl, googleNavUrl);
+          return;
+        }
       }
 
       // 2. ナビゲーションセッションの初期化
-      // 位置情報のパーミッション確認などは通常必要ですが、SDKの初期化を試みます
-      await GoogleMapsNavigator.initializeNavigationSession();
+      // タイムアウトを設定して、応答がない場合にIntentへフォールバック
+      await GoogleMapsNavigator.initializeNavigationSession().timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw TimeoutException('Navigation initialization timed out'),
+      );
       
       final waypoint = NavigationWaypoint.withLatLngTarget(
         title: _data.title,
@@ -268,8 +279,26 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
               appBar: AppBar(title: Text('${_data.title} への案内')),
               body: GoogleMapsNavigationView(
                 onViewCreated: (controller) async {
-                  await GoogleMapsNavigator.setDestinations(destinations);
-                  await GoogleMapsNavigator.startGuidance();
+                  final navigator = Navigator.of(context);
+                  try {
+                    // ルート計算の状態を確認
+                    final status = await GoogleMapsNavigator.setDestinations(destinations).timeout(
+                      const Duration(seconds: 15),
+                      onTimeout: () => throw TimeoutException('Routing timed out'),
+                    );
+
+                    if (status == NavigationRouteStatus.statusOk) {
+                      await GoogleMapsNavigator.startGuidance();
+                    } else {
+                      debugPrint("Routing failed with status: $status. Fallback to Intent.");
+                      if (navigator.mounted) navigator.pop();
+                      await _launchIntent(intentUrl, googleNavUrl);
+                    }
+                  } catch (e) {
+                    debugPrint("SDK View Error: $e. Fallback to Intent.");
+                    if (navigator.mounted) navigator.pop();
+                    await _launchIntent(intentUrl, googleNavUrl);
+                  }
                 },
               ),
             ),
@@ -277,12 +306,46 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
         );
       }
     } catch (e) {
-      debugPrint("Navigation Error: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('ナビゲーションの開始に失敗しました: $e')),
+      // 400エラーやタイムアウトなどの例外をキャッチ
+      debugPrint("SDK Error: $e. Fallback to Intent.");
+      await _launchIntent(intentUrl, googleNavUrl);
+    }
+  }
+
+  Future<void> _launchIntent(String url, String fallbackUrl) async {
+    try {
+      // LaunchMode.externalNonBrowserApplication を指定して強制的にブラウザ以外（マップアプリ）で開く
+      if (await canLaunchUrlString(url)) {
+        await launchUrlString(
+          url,
+          mode: LaunchMode.externalNonBrowserApplication,
         );
+        // Intent開始後は解析画面を閉じてダッシュボードに戻る
+        if (mounted) {
+          Navigator.of(context).pop();
+        }
+      } else if (await canLaunchUrlString(fallbackUrl)) {
+        await launchUrlString(
+          fallbackUrl,
+          mode: LaunchMode.externalNonBrowserApplication,
+        );
+        if (mounted) Navigator.of(context).pop();
+      } else {
+        // 最後の手段: https URL
+        final httpsUrl = 'https://www.google.com/maps/dir/?api=1&destination=${_data.latitude},${_data.longitude}&travelmode=driving';
+        if (await canLaunchUrlString(httpsUrl)) {
+          await launchUrlString(httpsUrl);
+          if (mounted) Navigator.of(context).pop();
+        } else {
+          throw 'Could not launch navigation';
+        }
       }
+    } catch (e) {
+      debugPrint("Intent Error: $e");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('ナビゲーションの開始に失敗しました: $e')),
+      );
     }
   }
 
