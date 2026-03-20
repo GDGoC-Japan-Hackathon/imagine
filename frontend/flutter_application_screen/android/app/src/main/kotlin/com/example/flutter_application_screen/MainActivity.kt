@@ -249,6 +249,20 @@ class MainActivity : FlutterActivity() {
                             result.success(false)
                         }
                     }
+                    // 位置情報が取得可能か（プロバイダーが存在するか）のチェック
+                    "canGetLocation" -> {
+                        try {
+                            val locationManager = getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+                            val providers = locationManager.getProviders(true)
+                            // GPS または Network プロバイダーが有効かチェック
+                            val isAvailable = providers.contains(android.location.LocationManager.GPS_PROVIDER) || 
+                                              providers.contains(android.location.LocationManager.NETWORK_PROVIDER)
+                            result.success(isAvailable)
+                        } catch (e: Exception) {
+                            Log.w("Location", "canGetLocation check failed: ${e.message}")
+                            result.success(false)
+                        }
+                    }
                     // 顔認識成功時のシステムサウンド（カメラのAFロック音）
                     "playFaceDetected" -> {
                         try {

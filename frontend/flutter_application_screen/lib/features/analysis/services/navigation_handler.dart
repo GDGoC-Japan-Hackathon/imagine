@@ -24,6 +24,18 @@ class NavigationHandler {
     }
   }
 
+  /// 位置情報がハードウェア的に取得可能かどうかをネイティブ側で確認する。
+  /// GPS や Network のプロバイダーが有効でない場合に false を返す。
+  static Future<bool> _canGetLocation() async {
+    try {
+      final result = await _channel.invokeMethod('canGetLocation');
+      return result == true;
+    } catch (e) {
+      debugPrint("Location availability check failed: $e");
+      return false;
+    }
+  }
+
   static Future<void> startNavigation({
     required BuildContext context,
     required AnalysisData data,
@@ -40,9 +52,10 @@ class NavigationHandler {
       return;
     }
 
-    final intentUrl = 'geo:${data.latitude},${data.longitude}?q=${data.latitude},${data.longitude}';
-    final googleNavUrl = 'google.navigation:q=${data.latitude},${data.longitude}';
-    final httpsUrl = 'https://www.google.com/maps/dir/?api=1&destination=${data.latitude},${data.longitude}&travelmode=driving';
+    final encodedTitle = Uri.encodeComponent(data.title);
+    final intentUrl = 'geo:${data.latitude},${data.longitude}?q=$encodedTitle';
+    final googleNavUrl = 'google.navigation:q=$encodedTitle';
+    final httpsUrl = 'https://www.google.com/maps/search/?api=1&query=$encodedTitle';
     
     // GMS が利用不可の場合は、SDK ルートを完全にスキップして Intent にフォールバック
     final gmsAvailable = await _isGmsAvailable();
@@ -54,12 +67,34 @@ class NavigationHandler {
       return;
     }
 
-    // GMS が利用可能な場合は、Navigation SDK を使用
+    // GMS が利用可能な場合は、位置情報サービスと権限を確認
     try {
+      // 1. 位置情報が取得可能か（ハードウェア/プロバイダー）をネィティブ側で詳細チェック
+      final canGetLocation = await _canGetLocation();
+      if (!canGetLocation) {
+        debugPrint("Location cannot be obtained (No Providers). Falling back to Intent.");
+        if (context.mounted) {
+          await _launchIntent(context, intentUrl, googleNavUrl, httpsUrl);
+        }
+        return;
+      }
+
+      // 2. 位置情報サービス（GPS）自体が有効かチェック
+      final serviceStatus = await Permission.location.serviceStatus;
+      if (!serviceStatus.isEnabled) {
+        debugPrint("Location services are disabled. Falling back to Intent.");
+        if (context.mounted) {
+          await _launchIntent(context, intentUrl, googleNavUrl, httpsUrl);
+        }
+        return;
+      }
+
+      // 3. 権限チェック
       var status = await Permission.location.status;
       if (!status.isGranted) {
         status = await Permission.location.request();
         if (!status.isGranted) {
+          debugPrint("Location permission denied. Falling back to Intent.");
           if (context.mounted) {
             await _launchIntent(context, intentUrl, googleNavUrl, httpsUrl);
           }
