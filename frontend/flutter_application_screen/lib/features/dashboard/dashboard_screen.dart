@@ -124,6 +124,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       await _cameraService.initialize(force: force);
       _isCameraInitialized = true;
 
+      // ネットワークモードへのフォールバックを通知
+      if (_cameraService.isNetworkMode) {
+        _showInfoSnackBar("ローカルカメラが見つかりません。ネットワークモードで起動しました。", title: "通知");
+      }
+
       // APIキーの読み込み (.env ファイルから取得)
       _geminiService.initialize(
         dotenv.env['GEMINI_API_KEY'] ?? '',
@@ -134,8 +139,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       _showDebugCamera = dotenv.env['DEBUG_SHOW_CAMERA']?.toLowerCase() == 'true';
       _showDebugFaceImage = dotenv.env['DEBUG_SHOW_FACE_IMAGE']?.toLowerCase() == 'true';
       
-      // AAOS環境（Raspberry Pi等）ではGPUが不安定なため、CPUデリゲート(0)を優先する
-      final int delegate = _cameraService.isAutomotive ? 0 : 1;
+      // AAOS環境（Raspberry Pi等）やネットワークモードでは GPU が不安定な場合があるため、CPUデリゲート(0) を検討
+      final String? envDelegate = dotenv.env['MEDIAPIPE_DELEGATE'];
+      final int defaultDelegate = (_cameraService.isAutomotive || _cameraService.isNetworkMode) ? 0 : 1;
+      final int delegate = envDelegate != null ? (int.tryParse(envDelegate) ?? defaultDelegate) : defaultDelegate;
+
       await _mediapipeService.initialize(
         debugShowFaceImage: _showDebugFaceImage,
         delegate: delegate,
@@ -470,6 +478,21 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   }
 
   void _showErrorSnackBar(String message) {
+    _showSnackBar(message, isError: true);
+  }
+
+  void _showInfoSnackBar(String message, {String title = "情報"}) {
+    _showSnackBar(message, isError: false, title: title);
+  }
+
+  void _showSnackBar(String message, {bool isError = false, String? title}) {
+    final Color bgColor = isError 
+        ? const Color(0xFF2C3E50).withValues(alpha: 0.9)
+        : const Color(0xFF1ABC9C).withValues(alpha: 0.9);
+    final Color iconColor = isError ? const Color(0xFFFF8B8B) : const Color(0xFFE2F063);
+    final IconData icon = isError ? Icons.error_outline : Icons.info_outline;
+    final String displayTitle = title ?? (isError ? (_debugMode ? "DEBUG ERROR" : "エラー") : "情報");
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         backgroundColor: Colors.transparent,
@@ -478,7 +501,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         content: Container(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           decoration: BoxDecoration(
-            color: const Color(0xFF2C3E50).withValues(alpha: 0.9),
+            color: bgColor,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: Colors.white10, width: 1),
             boxShadow: [
@@ -491,7 +514,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           ),
           child: Row(
             children: [
-              const Icon(Icons.error_outline, color: Color(0xFFFF8B8B), size: 28),
+              Icon(icon, color: iconColor, size: 28),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -499,7 +522,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _debugMode ? "DEBUG ERROR" : "エラー",
+                      displayTitle,
                       style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                     ),
                     Text(
