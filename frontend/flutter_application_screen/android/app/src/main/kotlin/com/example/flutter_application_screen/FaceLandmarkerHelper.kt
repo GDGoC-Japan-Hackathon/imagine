@@ -9,12 +9,14 @@ import android.view.WindowManager
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.framework.image.MPImage
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarkerResult
 
 class FaceLandmarkerHelper(
     private val context: Context,
+    private val delegate: Int = 1, // 0: CPU, 1: GPU
     private val resultListener: (FaceLandmarkerResult?, MPImage) -> Unit,
     private val errorListener: (String) -> Unit
 ) {
@@ -22,11 +24,19 @@ class FaceLandmarkerHelper(
     private var faceLandmarker: FaceLandmarker? = null
 
     init {
-        setupFaceLandmarker()
+        setupFaceLandmarker(delegate)
     }
 
-    fun setupFaceLandmarker() {
+    fun setupFaceLandmarker(delegate: Int = 1) {
         val baseOptionsBuilder = BaseOptions.builder().setModelAssetPath("face_landmarker.task")
+        
+        if (delegate == 0) {
+            baseOptionsBuilder.setDelegate(Delegate.CPU)
+            android.util.Log.d(TAG, "Delegate forced to: CPU")
+        } else {
+            baseOptionsBuilder.setDelegate(Delegate.GPU)
+            android.util.Log.d(TAG, "Delegate set to: GPU")
+        }
 
         try {
             val optionsBuilder =

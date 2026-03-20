@@ -7,7 +7,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import '../../../core/constants/app_constants.dart';
 
+/// カメラの初期化、管理、およびキャプチャ機能を担当するサービス。
+/// 通常のローカルカメラと、ネットワーク経由のリレーカメラの両方をサポートします。
 class CameraService {
   static final CameraService _instance = CameraService._internal();
   factory CameraService() => _instance;
@@ -15,16 +18,24 @@ class CameraService {
 
   static const MethodChannel _channel = MethodChannel('com.example.imagine/mediapipe');
   bool _isAutomotiveCache = false;
+  bool get isAutomotive => _isAutomotiveCache;
 
+  /// インカメラ（主に顔認識用）のコントローラー
   CameraController? inCameraController;
+  /// アウトカメラ（主に景色撮影用）のコントローラー
   CameraController? outCameraController;
   List<CameraDescription> _cameras = [];
 
+  /// 現在ネットワークモード（リレーサーバー経由）で動作しているかどうか
   bool isNetworkMode = false;
   WebSocketChannel? _networkChannel;
   StreamController<Uint8List>? _networkStreamController;
+  
+  /// ネットワークカメラからの画像ストリーム
   Stream<Uint8List>? get networkImageStream => _networkStreamController?.stream;
 
+  /// カメラサービスを初期化します。
+  /// [force] が true の場合、既存のコントローラーを破棄して再初期化を強制します。
   Future<void> initialize({bool force = false}) async {
     // 既に初期化されており、強制再起動でない場合はスキップ
     if (!force && 
@@ -39,8 +50,8 @@ class CameraService {
     
     // USBカメラの認識に時間がかかる場合があるため、空なら一度だけリトライ
     if (_cameras.isEmpty) {
-      debugPrint("No cameras found. Retrying in 1s...");
-      await Future.delayed(const Duration(seconds: 1));
+      debugPrint("No cameras found. Retrying in ${AppConstants.cameraRetryDelay.inSeconds}s...");
+      await Future.delayed(AppConstants.cameraRetryDelay);
       _cameras = await availableCameras();
     }
 
@@ -70,9 +81,9 @@ class CameraService {
     CameraDescription selectedInCamera;
     
     // .envから手動インデックス設定を取得
-    final int manualInIndex = int.tryParse(dotenv.env['IN_CAMERA_INDEX'] ?? '-1') ?? -1;
+    final int manualInIndex = int.tryParse(dotenv.env['IN_CAMERA_INDEX'] ?? '${AppConstants.defaultManualIndex}') ?? AppConstants.defaultManualIndex;
     
-    if (manualInIndex != -1 && manualInIndex < _cameras.length) {
+    if (manualInIndex != AppConstants.defaultManualIndex && manualInIndex < _cameras.length) {
       // 手動指定がある場合はそれを優先
       selectedInCamera = _cameras[manualInIndex];
     } else if (_cameras.length <= 1) {
@@ -110,36 +121,48 @@ class CameraService {
     // アウトカメラは初期化時（常時）起動せず、必要になった瞬間にのみ起動します。
   }
 
-  /// アウトカメラで静止画を撮影
+  /// アウトカメラ（またはネットワーク経由の背面カメラ）で静止画を撮影します。
   Future<XFile?> captureOutCameraImage() async {
     if (isNetworkMode) {
-      if (_networkChannel != null && _networkStreamController != null) {
-        try {
-          // Switch to back camera
-          _networkChannel!.sink.add(jsonEncode({"command": "switch_camera", "lensDirection": "back"}));
-          // Wait briefly for camera hardware to physically switch on streamer app
-          await Future.delayed(const Duration(milliseconds: 1500));
+      return await _captureNetworkImage();
+    }
+    return await _captureLocalOutCameraImage();
+  }
+
+  /// ネットワークリレー経由で画像をキャプチャします。
+  Future<XFile?> _captureNetworkImage() async {
+    if (_networkChannel == null || _networkStreamController == null) return null;
+
+    try {
+      // 背面カメラに切り替え指示
+      _networkChannel!.sink.add(jsonEncode({"command": "switch_camera", "lensDirection": "back"}));
+      // カメラハードウェアの物理的な切り替えを待機
+      await Future.delayed(AppConstants.networkCaptureSwitchDelay);
+      
+      // 前面のバッファ残りを避けるため、数フレームスキップして最新を取得
+      final jpegBytes = await networkImageStream!
+          .take(AppConstants.networkCaptureSkipFrames)
+          .last
+          .timeout(AppConstants.networkCaptureTimeout);
           
-          // skip some frames to clear the buffer of front camera images
-          final jpegBytes = await networkImageStream!.take(5).last.timeout(const Duration(seconds: 4));
-          final tempDir = await getTemporaryDirectory();
-          final file = File('${tempDir.path}/out_network_${DateTime.now().millisecondsSinceEpoch}.jpg');
-          await file.writeAsBytes(jpegBytes);
-          
-          // Switch back to front camera for face tracking
-          _networkChannel!.sink.add(jsonEncode({"command": "switch_camera", "lensDirection": "front"}));
-          
-          return XFile(file.path);
-        } catch (e) {
-          debugPrint("Failed to capture network image: $e");
-          // Attempt to restore front camera even on error
-          _networkChannel?.sink.add(jsonEncode({"command": "switch_camera", "lensDirection": "front"}));
-          return null;
-        }
-      }
+      final tempDir = await getTemporaryDirectory();
+      final file = File('${tempDir.path}/out_network_${DateTime.now().millisecondsSinceEpoch}.jpg');
+      await file.writeAsBytes(jpegBytes);
+      
+      // 顔変換用にフロントカメラに戻す
+      _networkChannel!.sink.add(jsonEncode({"command": "switch_camera", "lensDirection": "front"}));
+      
+      return XFile(file.path);
+    } catch (e) {
+      debugPrint("Failed to capture network image: $e");
+      // エラー時もフロントカメラへの復帰を試みる
+      _networkChannel?.sink.add(jsonEncode({"command": "switch_camera", "lensDirection": "front"}));
       return null;
     }
+  }
 
+  /// ローカルのアウトカメラを使用して画像をキャプチャします。
+  Future<XFile?> _captureLocalOutCameraImage() async {
     // 1. Androidデュアルカメラ仕様の問題（リアがフロントを上書きする現象）を防ぐため、
     // まず完全にフロントカメラ（インカメラ）を破棄し、ハードウェアロックを解除します。
     if (inCameraController != null) {
@@ -160,9 +183,9 @@ class CameraService {
     CameraDescription selectedOutCamera;
     
     // .envから手動インデックス設定を取得
-    final int manualOutIndex = int.tryParse(dotenv.env['OUT_CAMERA_INDEX'] ?? '-1') ?? -1;
+    final int manualOutIndex = int.tryParse(dotenv.env['OUT_CAMERA_INDEX'] ?? '${AppConstants.defaultManualIndex}') ?? AppConstants.defaultManualIndex;
 
-    if (manualOutIndex != -1 && manualOutIndex < _cameras.length) {
+    if (manualOutIndex != AppConstants.defaultManualIndex && manualOutIndex < _cameras.length) {
       // 手動指定がある場合はそれを優先
       selectedOutCamera = _cameras[manualOutIndex];
     } else if (_cameras.length <= 1) {
@@ -198,21 +221,19 @@ class CameraService {
       return null;
     }
 
-    // 3. 撮影を実行
+    // 撮影を実行
     XFile? capturedImage;
     if (outCameraController != null && outCameraController!.value.isInitialized) {
       try {
         capturedImage = await outCameraController!.takePicture();
-        // 撮影直後に即座にdisposeすると、ネイティブ側（特にオートフォーカス解除時など）で
-        // "CameraDevice was already closed" エラーが発生してクラッシュする場合があるため、
-        // わずかなディレイを置いて後処理を待機します。（特にPixelなどの端末で有効）
-        await Future.delayed(const Duration(milliseconds: 200));
+        // 撮影直後に即座にdisposeするとクラッシュする場合があるため、わずかなディレイを置く
+        await Future.delayed(AppConstants.cameraCaptureDelay);
       } catch (e) {
         debugPrint("Error taking picture: $e");
       }
     }
 
-    // 4. 重複起動を防ぐため、撮影後は即座にアウトカメラを破棄します
+    // 重複起動を防ぐため、撮影後は即座にアウトカメラを破棄します
     try {
       if (outCameraController != null) {
         await outCameraController!.dispose();
@@ -227,10 +248,10 @@ class CameraService {
   }
 
   void _connectToRelay() {
-    final url = dotenv.env['RELAY_WS_URL'] ?? 'ws://127.0.0.1:8080';
+    final url = dotenv.env['RELAY_WS_URL'] ?? AppConstants.defaultRelayWsUrl;
     try {
       _networkChannel = WebSocketChannel.connect(Uri.parse(url));
-      // Start with front camera for face tracking
+      // 初期状態として顔認識用のフロントカメラを要求
       _networkChannel!.sink.add(jsonEncode({"command": "switch_camera", "lensDirection": "front"}));
       
       _networkChannel!.stream.listen((message) {
@@ -247,6 +268,7 @@ class CameraService {
     }
   }
 
+  /// 全てのカメラリソースとネットワーク接続を解放します。
   Future<void> dispose() async {
     try {
       if (inCameraController != null) {

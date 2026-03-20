@@ -56,9 +56,12 @@ class MainActivity : FlutterActivity() {
                     "init" -> {
                         try {
                             debugShowFaceImage = call.argument<Boolean>("debugShowFaceImage") ?: false
+                            val delegate = call.argument<Int>("delegate") ?: 1 // Default to GPU
+                            
                             if (faceLandmarkerHelper == null) {
                                 faceLandmarkerHelper = FaceLandmarkerHelper(
                                     context = this,
+                                    delegate = delegate,
                                     resultListener = { faceResult, input ->
                                         if (faceResult != null) {
                                             val faceLandmarks = faceResult.faceLandmarks()
@@ -225,22 +228,20 @@ class MainActivity : FlutterActivity() {
                         try {
                             val sound = MediaActionSound()
                             sound.play(MediaActionSound.FOCUS_COMPLETE)
-                            result.success(null)
                         } catch (e: Exception) {
                             Log.w("Sound", "playFaceDetected failed: ${e.message}")
-                            result.success(null) // エラーでも続行
                         }
+                        result.success(null)
                     }
                     // 音声録音開始時のシステムサウンド（通知音）
                     "playVoiceStart" -> {
                         try {
                             val sound = MediaActionSound()
                             sound.play(MediaActionSound.FOCUS_COMPLETE)
-                            result.success(null)
                         } catch (e: Exception) {
                             Log.w("Sound", "playVoiceStart failed: ${e.message}")
-                            result.success(null) // エラーでも続行
                         }
+                        result.success(null)
                     }
                     else -> result.notImplemented()
                 }

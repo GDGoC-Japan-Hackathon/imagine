@@ -17,10 +17,11 @@ class MediapipeService {
         return data.map((key, value) => MapEntry(key.toString(), value));
       });
 
-  Future<void> initialize({bool debugShowFaceImage = false}) async {
+  Future<void> initialize({bool debugShowFaceImage = false, int delegate = 1}) async {
     try {
       await _methodChannel.invokeMethod('init', {
         'debugShowFaceImage': debugShowFaceImage,
+        'delegate': delegate,
       });
     } on PlatformException catch (e) {
       debugPrint("Failed to initialize MediaPipe: ${e.message}");
