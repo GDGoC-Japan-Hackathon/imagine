@@ -95,17 +95,25 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   }
 
   Future<void> _initApp({bool force = false}) async {
+    // 既に初期化処理が進行中の場合は、強制実行(force)でない限りスキップ
+    if (_isProcessing && !force) return;
+    _isProcessing = true;
+    
     try {
-      // 権限のリクエスト (AAOSでは明示的なリクエストが必要な場合がある)
-      final status = await Permission.camera.request();
-      if (status.isDenied) {
-        setState(() => _statusMessage = "カメラの権限が必要です");
+      // 権限をまとめてリクエスト
+      final statuses = await [
+        Permission.camera,
+        Permission.microphone,
+      ].request();
+
+      if (statuses[Permission.camera]!.isDenied) {
+        setState(() {
+          _statusMessage = "カメラの権限が必要です";
+          _isProcessing = false;
+        });
         _showErrorSnackBar("カメラの利用が許可されていません（権限設定を確認してください）");
         return;
       }
-      
-      // 音声も権限リクエスト
-      await Permission.microphone.request();
 
       await _cameraService.initialize(force: force);
       _isCameraInitialized = true;
@@ -130,7 +138,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         _startFaceTracking();
         _startGuidanceTimer();
       }
+      _isProcessing = false; // 初期化完了
     } catch (e) {
+      _isProcessing = false;
       debugPrint("Initialization error: $e");
       setState(() => _statusMessage = "カメラの初期化に失敗しました");
       // カメラ初期化失敗時、SnackBarにてエラーを表示する
