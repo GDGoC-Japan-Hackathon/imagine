@@ -1,4 +1,3 @@
-@@ -1,12 +1,54 @@
 # Proguard rules to ignore missing annotation processor classes
 # These warnings are common when using libraries that include AutoValue but don't exclude its processor in release builds.
 
