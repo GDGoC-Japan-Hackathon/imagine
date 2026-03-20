@@ -8,8 +8,8 @@ class FaceTrackerService {
 
   // Python実装（10fps換算で6フレーム = 約600ms）を、Dart側（約33fps）に換算して20フレームとして設定
   static const int _requiredStableFrames = 20; 
-  static const double _yawThreshold = 3.0;
-  static const double _pitchThreshold = 3.0;
+  static const double _yawThreshold = 1.0;
+  static const double _pitchThreshold = 1.0;
 
   // 安定判定の基準となる位置（アンカー）を保持
   final Map<int, FaceVector> _anchorFaceVectors = {};
