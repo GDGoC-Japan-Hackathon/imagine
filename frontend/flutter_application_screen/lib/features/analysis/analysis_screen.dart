@@ -16,6 +16,7 @@ import 'package:record/record.dart';
 import 'package:path/path.dart' as p;
 import '../../common_widgets/voice_waveform.dart';
 import '../camera/services/gemini_service.dart';
+import '../../core/services/sound_service.dart';
 
 enum AnalysisPhase { generating, peakPulse, convergence, reveal, complete }
 
@@ -225,6 +226,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
         // 録音開始 (AAC/m4a)
         await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: path);
 
+        // 録音開始の合図としてシステム通知音を再生
+        SoundService.playVoiceStart();
+
         // VAD (Voice Activity Detection): 声が途切れたら自動停止
         DateTime lastSoundTime = DateTime.now();
         _amplitudeSub = _recorder.onAmplitudeChanged(const Duration(milliseconds: 50)).listen((amp) {
@@ -403,7 +407,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
       // 3. ナビゲーション画面を表示するための画面遷移
       if (mounted) {
-        Navigator.of(context).push(
+        Navigator.of(context).pushReplacement(
           MaterialPageRoute(
             builder: (context) => Scaffold(
               appBar: AppBar(title: Text('${_data.title} への案内')),
