@@ -411,12 +411,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         content: Container(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           decoration: BoxDecoration(
-            color: const Color(0xFF2C3E50).withOpacity(0.9),
+            color: const Color(0xFF2C3E50).withValues(alpha: 0.9),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: Colors.white10, width: 1),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.2),
+                color: Colors.black.withValues(alpha: 0.2),
                 blurRadius: 20,
                 offset: const Offset(0, 10),
               ),
@@ -437,7 +437,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                     ),
                     Text(
                       message,
-                      style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12),
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 12),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
