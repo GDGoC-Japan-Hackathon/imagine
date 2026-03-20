@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:camera/camera.dart';
+import 'package:camera/camera.dart' hide CameraException;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'dart:math' as math;
 
@@ -420,11 +420,22 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       debugPrint("Error stopping image stream: $e");
     }
     
-    // 2. アウトカメラで撮影
-    final capturedImage = await _cameraService.captureOutCameraImage();
-    
-    if (mounted) {
-      _navigateToGeneratingAndAnalyze(targetVector, capturedImage: capturedImage);
+    try {
+      // 2. アウトカメラで撮影
+      final capturedImage = await _cameraService.captureOutCameraImage();
+      
+      if (mounted) {
+        _navigateToGeneratingAndAnalyze(targetVector, capturedImage: capturedImage);
+      }
+    } catch (e) {
+      debugPrint("Error during capture and transition: $e");
+      if (mounted) {
+        final String message = e is AppException ? e.message : "風景の撮影に失敗しました: $e";
+        _showErrorSnackBar(message);
+        // 失敗した場合はトラッキング状態をリセットして通常モードに戻る
+        _resetTrackingState();
+        _startFaceTracking();
+      }
     }
   }
 

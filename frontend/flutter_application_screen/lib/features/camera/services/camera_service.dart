@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:camera/camera.dart';
+import 'package:camera/camera.dart' hide CameraException;
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:path_provider/path_provider.dart';
@@ -107,12 +107,13 @@ class CameraService {
       );
     }
     
-    inCameraController = CameraController(
-      selectedInCamera, 
-      ResolutionPreset.medium, 
-      enableAudio: false,
-    );
-
+    try {
+      inCameraController = CameraController(
+        selectedInCamera, 
+        ResolutionPreset.medium, 
+        enableAudio: false,
+      );
+      await inCameraController?.initialize();
     } on PlatformException catch (e) {
       debugPrint("Platform error during camera initialization: $e");
       throw CameraException("カメラデバイスの属性取得に失敗しました", e.code);
@@ -231,18 +232,7 @@ class CameraService {
       );
     }
     
-    outCameraController = CameraController(
-      selectedOutCamera, 
-      ResolutionPreset.high, 
-      enableAudio: false,
-    );
-    
-    try {
-      await outCameraController?.initialize();
-    } catch (e) {
-      debugPrint("Error initializing out-camera for capture: $e");
-      return null;
-    }
+    outCameraController = await _initController(selectedOutCamera, ResolutionPreset.high);
 
     // 撮影を実行
     XFile? capturedImage;

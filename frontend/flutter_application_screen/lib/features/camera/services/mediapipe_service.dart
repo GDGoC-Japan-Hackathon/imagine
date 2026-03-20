@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'package:flutter/services.dart';
-import 'package:camera/camera.dart';
+import 'package:camera/camera.dart' hide CameraException;
 
 import '../../../core/errors/exceptions.dart';
 
