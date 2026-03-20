@@ -1,25 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:flutter/foundation.dart';
 import 'package:googleapis_auth/auth_io.dart' as auth;
 import '../../../core/constants/app_constants.dart';
-
-/// Gemini APIによる画像解析結果を保持するクラス。
-class GeminiAnalysisResult {
-  /// 対象物の名前
-  final String targetName;
-  /// 対象物の詳細な解説
-  final String guideDesc;
-  /// セグメンテーション用データ（ポリゴン情報など）
-  final List<dynamic> segData;
-  /// 付近の緯度
-  final double? latitude;
-  /// 付近の経度
-  final double? longitude;
-
-  GeminiAnalysisResult(this.targetName, this.guideDesc, this.segData, {this.latitude, this.longitude});
-}
+import '../../../core/errors/exceptions.dart';
+import '../models/gemini_analysis_result.dart';
+import 'gemini_parser.dart';
 
 /// Gemini APIとのやり取りを担当するサービス。
 /// 画像解析、テキスト読み上げ(TTS)、音声インテント分類
@@ -44,7 +32,6 @@ class GeminiService {
   /// [imageFile] 解析対象の画像, [pan] カメラの水平角度, [tilt] カメラの垂直角度
   Future<GeminiAnalysisResult> analyzeAndMask(File imageFile, double pan, double tilt) async {
     // 座標のパーセント変換・正規化 
-    // カメラの一般的な画角(FOV)を考慮してマッピング (例: 水平60度, 垂直45度)
     double percentX = (pan / 60.0 + 0.5) * 100.0;
     double percentY = (tilt / 45.0 + 0.5) * 100.0;
     
@@ -55,36 +42,25 @@ class GeminiService {
 
     final prompt = _buildAnalysisPrompt(locationDesc);
 
-    final bytes = await imageFile.readAsBytes();
-    final content = [Content.multi([TextPart(prompt), DataPart('image/jpeg', bytes)])];
-
     try {
+      final bytes = await imageFile.readAsBytes();
+      final content = [Content.multi([TextPart(prompt), DataPart('image/jpeg', bytes)])];
+
       final response = await _model!.generateContent(
         content,
         generationConfig: GenerationConfig(responseMimeType: "application/json"),
       );
 
-      final jsonText = _cleanJsonResponse(response.text ?? "{}");
-      final Map<String, dynamic> decoded = jsonDecode(jsonText);
-      
-      final targetName = decoded["名前"]?.toString() ?? "指定位置の対象物";
-      final guideDesc = decoded["解説"]?.toString() ?? "解説を取得できませんでした。";
-      
-      // 出力フォーマットに合わせるためのポリゴン処理
-      final List<dynamic> polygon = decoded["polygon"] is List ? decoded["polygon"] : [0, 0, 1000, 1000];
-      final segData = [ {"polygon": polygon} ];
-      
-      final double? latitude = decoded["latitude"] is num ? (decoded["latitude"] as num).toDouble() : null;
-      final double? longitude = decoded["longitude"] is num ? (decoded["longitude"] as num).toDouble() : null;
-      
-      return GeminiAnalysisResult(targetName, guideDesc, segData, latitude: latitude, longitude: longitude);
+      final responseText = response.text;
+      if (responseText == null || responseText.isEmpty) {
+        throw GeminiException("AIからの空の回答が返されました");
+      }
+
+      return GeminiParser.parseAnalysisResponse(responseText);
     } catch (e) {
       debugPrint("Gemini analysis failed: $e");
-      return GeminiAnalysisResult(
-        "認識エラー", 
-        "解説の取得に失敗しました。", 
-        [ {"polygon": [0, 0, 1000, 1000]} ]
-      );
+      if (e is AppException) rethrow;
+      throw GeminiException("画像キャプションの生成中にエラーが発生しました: $e");
     }
   }
 
@@ -114,21 +90,7 @@ $locationDesc
 ''';
   }
 
-  /// Markdownのコードブロック(```json ... ```)などが含まれている場合に中身だけを取り出す
-  String _cleanJsonResponse(String text) {
-    String cleaned = text.trim();
-    if (cleaned.startsWith('```')) {
-      final lines = cleaned.split('\n');
-      if (lines.length > 2) {
-        // 最初の行(```json)と最後の行(```)を除去
-        cleaned = lines.sublist(1, lines.length - 1).join('\n');
-      }
-    }
-    return cleaned;
-  }
-
   /// テキストを音声に変換(TTS)します。
-  /// [text] 読み上げるテキスト。成功した場合は音声データのバイト列を返す
   Future<Uint8List?> synthesizeSpeech(String text) async {
     String? jsonStr = _serviceAccountJson;
     if (jsonStr == null || jsonStr.isEmpty) {
@@ -136,22 +98,20 @@ $locationDesc
       return null;
     }
 
-    // .env でクォート（' や "）で囲まれている場合を考慮し、最初の '{' から最後の '}' までを抽出
+    // .env でクォート（' や "）で囲まれている場合を考慮
     jsonStr = jsonStr.trim();
     final firstBrace = jsonStr.indexOf('{');
     final lastBrace = jsonStr.lastIndexOf('}');
     if (firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace) {
       jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
     } else {
-      debugPrint("TTS OAuth Error: Valid JSON part ( { ... } ) not found in string.");
+      debugPrint("TTS OAuth Error: Valid JSON part not found.");
       return null;
     }
 
     try {
       final accountCredentials = auth.ServiceAccountCredentials.fromJson(jsonStr);
       final scopes = ['https://www.googleapis.com/auth/cloud-platform'];
-      
-      // 認証済みクライアントの作成
       final authClient = await auth.clientViaServiceAccount(accountCredentials, scopes);
 
       final url = Uri.parse('https://texttospeech.googleapis.com/v1beta1/text:synthesize');
@@ -178,6 +138,8 @@ $locationDesc
       }
     } catch (e) {
       debugPrint("TTS Request failed or Auth failed: $e");
+      if (e is AppException) rethrow;
+      throw GeminiException("音声合成のリクエスト中にエラーが発生しました: $e");
     }
     return null;
   }
@@ -201,17 +163,10 @@ $locationDesc
     };
   }
 
-  /// ユーザーの音声入力から目的地の追加の意思（Yes/No）を分類
-  /// [audioBytes] 録音された音声データ。
+  /// ユーザーの音声入力から目的地の追加の意思を分類
   Future<bool> classifyVoiceIntent(Uint8List audioBytes) async {
     final prompt = _buildVoiceIntentPrompt();
-
-    final content = [
-      Content.multi([
-        TextPart(prompt),
-        DataPart('audio/aac', audioBytes), 
-      ])
-    ];
+    final content = [Content.multi([TextPart(prompt), DataPart('audio/aac', audioBytes)])];
 
     try {
       final response = await _model!.generateContent(
@@ -219,9 +174,12 @@ $locationDesc
         generationConfig: GenerationConfig(responseMimeType: "application/json"),
       );
 
-      final jsonText = _cleanJsonResponse(response.text ?? "{}");
-      final Map<String, dynamic> decoded = jsonDecode(jsonText);
-      return decoded["positive"] == true;
+      final responseText = response.text;
+      if (responseText == null || responseText.isEmpty) {
+        return false;
+      }
+
+      return GeminiParser.parseVoiceIntentResponse(responseText);
     } catch (e) {
       debugPrint("Voice intent classification failed: $e");
       return false;
@@ -231,18 +189,17 @@ $locationDesc
   String _buildVoiceIntentPrompt() {
     return '''
 あなたは優秀なアシスタントです。
-提供された音声を聞き、ユーザーが目的地へ「行きたい（肯定・承諾）」と考えているか、「行きたくない・今は不要（否定・拒否）」と考えているかを正確に判定してください。
+提供された音声を聞き、ユーザーが目的地へ「行きたい（肯定・承諾）」と考えているか、「行きたくない（否定・拒否）」と考えているかを判定してください。
 
 判定基準：
-- 肯定的（はい、お願いします、行きたい、Yes、OKなど） -> "positive": true
-- 否定的（いいえ、大丈夫です、結構です、Noなど） -> "positive": false
-- 判断がつかない、または無音の場合 -> "positive": false
+- 肯定的 -> "positive": true
+- 否定的 -> "positive": false
+- 判断不能 -> "positive": false
 
-出力は以下のJSON形式のみとし、Markdownは一切含めないでください。
+出力は以下のJSON形式のみとし、Markdownは含めないでください。
 {
   "positive": boolean
 }
 ''';
   }
 }
-

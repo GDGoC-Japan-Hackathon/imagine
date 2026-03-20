@@ -12,6 +12,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:path/path.dart' as p;
+import '../../core/errors/exceptions.dart';
 import '../../common_widgets/voice_waveform.dart';
 import '../camera/services/gemini_service.dart';
 import '../../core/services/sound_service.dart';
@@ -138,7 +139,12 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
       }).catchError((e) {
         if (mounted) {
           final isDebug = dotenv.env['DEBUG_MODE']?.toLowerCase() == 'true';
-          final errorMsg = isDebug ? 'error:$e' : 'error:解析に失敗しました。しばらく待ってからやり直してください。';
+          String errorMsg;
+          if (e is AppException) {
+            errorMsg = 'error:${e.message}';
+          } else {
+            errorMsg = isDebug ? 'error:$e' : 'error:解析に失敗しました。しばらく待ってからやり直してください。';
+          }
           // エラー時はメッセージを添えてダッシュボードに戻る
           _navigateToDashboard(result: errorMsg);
         }

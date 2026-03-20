@@ -16,6 +16,7 @@ import '../camera/services/gemini_service.dart';
 import '../camera/services/mediapipe_service.dart';
 import '../camera/models/test_scenery.dart';
 import '../../core/services/sound_service.dart';
+import '../../core/errors/exceptions.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../core/constants/app_constants.dart';
 
@@ -162,8 +163,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       _isProcessing = false;
       debugPrint("Initialization error: $e");
       setState(() => _statusMessage = "カメラの初期化に失敗しました");
-      // カメラ初期化失敗時、SnackBarにてエラーを表示する
-      _showErrorSnackBar("カメラの初期化に失敗しました: $e");
+      
+      final String message = e is AppException ? e.message : "カメラの初期化に失敗しました: $e";
+      _showErrorSnackBar(message);
     }
   }
 
@@ -590,7 +592,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         longitude: result.longitude,
       );
     } else {
-      throw Exception("撮影に失敗しました。");
+      throw CameraException("撮影に失敗しました。");
     }
   }
 

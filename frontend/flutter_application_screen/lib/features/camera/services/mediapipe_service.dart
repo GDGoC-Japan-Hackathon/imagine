@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
 
+import '../../../core/errors/exceptions.dart';
+
 class MediapipeService {
   static final MediapipeService _instance = MediapipeService._internal();
   factory MediapipeService() => _instance;
@@ -25,6 +27,10 @@ class MediapipeService {
       });
     } on PlatformException catch (e) {
       debugPrint("Failed to initialize MediaPipe: ${e.message}");
+      throw CameraException("MediaPipeの初期化に失敗しました: ${e.message}", e.code);
+    } catch (e) {
+      debugPrint("Unexpected error during MediaPipe initialization: $e");
+      throw CameraException("MediaPipeの初期化中に予期せぬエラーが発生しました");
     }
   }
 
@@ -50,6 +56,7 @@ class MediapipeService {
       });
     } on PlatformException catch (e) {
       debugPrint("MediaPipe Detection error: ${e.message}");
+      throw CameraException("顔検出処理に失敗しました: ${e.message}", e.code);
     }
   }
 
@@ -62,6 +69,7 @@ class MediapipeService {
       });
     } on PlatformException catch (e) {
       debugPrint("MediaPipe Detection error: ${e.message}");
+      throw CameraException("JPEGからの顔検出処理に失敗しました: ${e.message}", e.code);
     }
   }
 

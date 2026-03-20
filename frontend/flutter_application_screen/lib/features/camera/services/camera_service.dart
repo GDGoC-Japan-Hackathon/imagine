@@ -8,6 +8,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../../../core/constants/app_constants.dart';
+import '../../../core/errors/exceptions.dart';
 
 /// カメラの初期化、管理、およびキャプチャ機能を担当するサービス。
 /// 通常のローカルカメラと、ネットワーク経由のリレーカメラの両方をサポートします。
@@ -112,13 +113,34 @@ class CameraService {
       enableAudio: false,
     );
 
-    try {
-      await inCameraController?.initialize();
+    } on PlatformException catch (e) {
+      debugPrint("Platform error during camera initialization: $e");
+      throw CameraException("カメラデバイスの属性取得に失敗しました", e.code);
     } catch (e) {
-      debugPrint("Error initializing in-camera: $e");
+      debugPrint("Camera initialization error: $e");
+      if (e is AppException) rethrow;
+      throw CameraException("カメラの初期化中にエラーが発生しました: $e");
     }
 
     // アウトカメラは初期化時（常時）起動せず、必要になった瞬間にのみ起動します。
+  }
+
+  /// 指定された設定でカメラコントローラーを初期化します。
+  Future<CameraController> _initController(CameraDescription description, ResolutionPreset preset) async {
+    final controller = CameraController(
+      description,
+      preset,
+      enableAudio: false,
+      imageFormatGroup: ImageFormatGroup.yuv420,
+    );
+
+    try {
+      await controller.initialize();
+      return controller;
+    } catch (e) {
+      debugPrint("Failed to initialize camera controller: $e");
+      throw CameraException("カメラの起動に失敗しました: $e");
+    }
   }
 
   /// アウトカメラ（またはネットワーク経由の背面カメラ）で静止画を撮影します。
@@ -157,7 +179,8 @@ class CameraService {
       debugPrint("Failed to capture network image: $e");
       // エラー時もフロントカメラへの復帰を試みる
       _networkChannel?.sink.add(jsonEncode({"command": "switch_camera", "lensDirection": "front"}));
-      return null;
+      if (e is AppException) rethrow;
+      throw CameraException("ネットワークカメラでの撮影に失敗しました: $e");
     }
   }
 
@@ -230,6 +253,7 @@ class CameraService {
         await Future.delayed(AppConstants.cameraCaptureDelay);
       } catch (e) {
         debugPrint("Error taking picture: $e");
+        throw CameraException("写真の撮影中にエラーが発生しました: $e");
       }
     }
 
