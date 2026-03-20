@@ -20,6 +20,7 @@ class _StreamerScreenState extends State<StreamerScreen> {
   CameraController? _controller;
   List<CameraDescription> _cameras = [];
   WebSocketChannel? _channel;
+  Timer? _reconnectTimer;
   bool _isStreaming = false;
   bool _isProcessingFrame = false;
   String _statusMessage = "初期化中...";
@@ -62,6 +63,7 @@ class _StreamerScreenState extends State<StreamerScreen> {
   /// WebSocket 接続処理
   /// 接続後は Dashboard 側からの JSON コマンド（カメラ切り替えなど）を待ち受けます。
   void _connectWebSocket(String url) {
+    _reconnectTimer?.cancel();
     try {
       _channel = WebSocketChannel.connect(Uri.parse(url));
       if (mounted) setState(() => _statusMessage = "接続済み: $url");
@@ -83,15 +85,35 @@ class _StreamerScreenState extends State<StreamerScreen> {
           }
         },
         onDone: () {
-          if (mounted) setState(() => _statusMessage = "WebSocket 切断");
+          if (mounted) {
+            setState(() => _statusMessage = "WebSocket 切断 - 5秒後に再接続します");
+            _scheduleReconnect(url);
+          }
         },
         onError: (e) {
-          if (mounted) setState(() => _statusMessage = "WebSocket エラー: $e");
+          if (mounted) {
+            setState(() => _statusMessage = "WebSocket エラー: $e - 5秒後に再接続します");
+            _scheduleReconnect(url);
+          }
         },
       );
     } catch (e) {
-      if (mounted) setState(() => _statusMessage = "WS 接続エラー: $e");
+      if (mounted) {
+        setState(() => _statusMessage = "WS 接続エラー: $e - 5秒後に再接続します");
+        _scheduleReconnect(url);
+      }
     }
+  }
+
+  /// 再接続をスケジュール
+  void _scheduleReconnect(String url) {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted) {
+        debugPrint("Attempting to reconnect to $url...");
+        _connectWebSocket(url);
+      }
+    });
   }
 
   /// Dashboard 側から受信したコマンドを処理
@@ -201,6 +223,7 @@ class _StreamerScreenState extends State<StreamerScreen> {
 
   @override
   void dispose() {
+    _reconnectTimer?.cancel();
     _channel?.sink.close();
     if (_isStreaming && _controller != null) {
       _controller!.stopImageStream();
