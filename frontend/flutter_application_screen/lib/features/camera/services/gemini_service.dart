@@ -8,8 +8,10 @@ class GeminiAnalysisResult {
   final String targetName;
   final String guideDesc;
   final List<dynamic> segData;
+  final double? latitude;
+  final double? longitude;
 
-  GeminiAnalysisResult(this.targetName, this.guideDesc, this.segData);
+  GeminiAnalysisResult(this.targetName, this.guideDesc, this.segData, {this.latitude, this.longitude});
 }
 
 class GeminiService {
@@ -54,7 +56,9 @@ $locationDesc
 {
     "名前": "対象物の具体的な名称",
     "解説": "こちらに写っておりますのは…から始まるような、丁寧で詳細な解説文",
-    "polygon": [ymin, xmin, ymax, xmax]
+    "polygon": [ymin, xmin, ymax, xmax],
+    "latitude": 付近の緯度 (数値、不明な場合は null),
+    "longitude": 付近の経度 (数値、不明な場合は null)
 }
 ※ polygon は対象物を実際に囲む 0 から 1000 までの正規化座標 [y_min, x_min, y_max, x_max] の4つの数値の配列です。
 ''';
@@ -77,7 +81,10 @@ $locationDesc
       final List<dynamic> polygon = decoded["polygon"] ?? [0, 0, 1000, 1000];
       final segData = [ {"polygon": polygon} ];
       
-      return GeminiAnalysisResult(targetName, guideDesc, segData);
+      final latitude = decoded["latitude"] is num ? (decoded["latitude"] as num).toDouble() : null;
+      final longitude = decoded["longitude"] is num ? (decoded["longitude"] as num).toDouble() : null;
+      
+      return GeminiAnalysisResult(targetName, guideDesc, segData, latitude: latitude, longitude: longitude);
     } catch (e) {
       return GeminiAnalysisResult(
         "認識エラー", 
