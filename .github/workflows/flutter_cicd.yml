@@ -78,7 +78,7 @@ jobs:
 
       - name: Rename APK
         run: |
-          mv build/app/outputs/flutter-apk/app-release.apk \
+          mv build/app/outputs/flutter-apk/app-debug.apk \
              build/app/outputs/flutter-apk/app-${{ github.ref_name }}-${{ github.run_number }}.apk
 
       - name: Upload APK
