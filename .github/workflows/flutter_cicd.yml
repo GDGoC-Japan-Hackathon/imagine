@@ -34,10 +34,13 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Create .env file
+      - name: Create .env and local.properties files
+        env:
+          ENV_FILE_CONTENT: ${{ secrets.ENV_FILE }}
+          LOCAL_PROPERTIES_CONTENT: ${{ secrets.LOCAL_PROPERTIES }}
         run: |
-          echo "${{ secrets.ENV_FILE }}" > .env
-          echo "${{ secrets.LOCAL_PROPERTIES }}" > android/local.properties
+          echo "$ENV_FILE_CONTENT" > .env
+          echo "$LOCAL_PROPERTIES_CONTENT" > android/local.properties
 
       - name: Analyze
         run: flutter analyze
@@ -68,10 +71,13 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Create .env file
+      - name: Create .env and local.properties files
+        env:
+          ENV_FILE_CONTENT: ${{ secrets.ENV_FILE }}
+          LOCAL_PROPERTIES_CONTENT: ${{ secrets.LOCAL_PROPERTIES }}
         run: |
-          echo "${{ secrets.ENV_FILE }}" > .env
-          echo "${{ secrets.LOCAL_PROPERTIES }}" > android/local.properties
+          echo "$ENV_FILE_CONTENT" > .env
+          echo "$LOCAL_PROPERTIES_CONTENT" > android/local.properties
 
       - name: Build APK
         run: flutter build apk --debug
