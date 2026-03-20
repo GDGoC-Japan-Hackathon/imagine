@@ -37,6 +37,7 @@ jobs:
       - name: Create .env file
         run: |
           echo "${{ secrets.ENV_FILE }}" > .env
+          echo "${{ secrets.LOCAL_PROPERTIES }}" > android/local.properties
 
       - name: Analyze
         run: flutter analyze
@@ -70,6 +71,7 @@ jobs:
       - name: Create .env file
         run: |
           echo "${{ secrets.ENV_FILE }}" > .env
+          echo "${{ secrets.LOCAL_PROPERTIES }}" > android/local.properties
 
       - name: Build APK
         run: flutter build apk --release
