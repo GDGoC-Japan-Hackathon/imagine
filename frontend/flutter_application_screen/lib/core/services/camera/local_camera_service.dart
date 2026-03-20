@@ -21,34 +21,95 @@ class LocalCameraService implements BaseCameraService {
 
   bool get isAutomotive => _isAutomotive;
 
+  /// AAOS環境かどうかをカメラ初期化前に事前チェックするメソッド。
+  /// カメラ初期化に依存しないため、起動直後に呼び出すことができる。
+  Future<bool> checkIsAutomotive() async {
+    try {
+      _isAutomotive = await _channel.invokeMethod('isAutomotiveOS') ?? false;
+    } catch (e) {
+      debugPrint("Failed to check automotive OS: $e");
+      _isAutomotive = false;
+    }
+    return _isAutomotive;
+  }
+
   @override
   Future<void> initialize({bool force = false}) async {
     if (!force && isInitialized) return;
 
     await dispose();
-    _cameras = await availableCameras();
+    
+    // AAOS判定（まだ取得していない場合のみ）
+    if (!_isAutomotive) {
+      await checkIsAutomotive();
+    }
+    
+    // AAOS環境ではUSBカメラの認識に時間がかかるため、リトライ回数を増やす
+    _cameras = await _safeAvailableCameras();
     
     if (_cameras.isEmpty) {
-      await Future.delayed(AppConstants.cameraRetryDelay);
-      _cameras = await availableCameras();
+      final retryCount = _isAutomotive ? AppConstants.cameraRetryCount : 1;
+      final retryDelay = _isAutomotive ? AppConstants.cameraRetryDelayAaos : AppConstants.cameraRetryDelay;
+      
+      for (int i = 0; i < retryCount && _cameras.isEmpty; i++) {
+        debugPrint("カメラ検出リトライ (${i + 1}/$retryCount)...");
+        await Future.delayed(retryDelay);
+        _cameras = await _safeAvailableCameras();
+      }
     }
 
     if (_cameras.isEmpty) {
       throw CameraException("利用可能なカメラが見つかりません");
     }
 
-    try {
-      _isAutomotive = await _channel.invokeMethod('isAutomotiveOS') ?? false;
-    } catch (e) {
-      debugPrint("Failed to check automotive os: $e");
-    }
-
     final selectedInCamera = _selectFrontCamera();
     
+    // 解像度フォールバック: medium → low
+    await _initializeFrontCamera(selectedInCamera);
+  }
+
+  /// `availableCameras()` を安全に呼び出すラッパー。
+  /// AAOS環境ではカメラサービスが無効化されている場合に
+  /// PlatformException が発生するため、空リストを返すようにする。
+  Future<List<CameraDescription>> _safeAvailableCameras() async {
+    try {
+      return await availableCameras();
+    } on PlatformException catch (e) {
+      debugPrint("availableCameras() PlatformException: ${e.message}");
+      return [];
+    } catch (e) {
+      debugPrint("availableCameras() error: $e");
+      return [];
+    }
+  }
+
+  /// フロントカメラコントローラーの初期化。
+  /// 解像度がサポートされない場合のフォールバックを含む。
+  Future<void> _initializeFrontCamera(CameraDescription camera) async {
+    // まず medium で試行
     try {
       frontCameraController = CameraController(
-        selectedInCamera, 
+        camera, 
         ResolutionPreset.medium, 
+        enableAudio: false,
+      );
+      await frontCameraController?.initialize();
+      return;
+    } on PlatformException catch (e) {
+      debugPrint("カメラ初期化(medium)失敗: ${e.message}、低解像度でリトライします");
+      await frontCameraController?.dispose();
+      frontCameraController = null;
+    } catch (e) {
+      debugPrint("カメラ初期化(medium)エラー: $e、低解像度でリトライします");
+      await frontCameraController?.dispose();
+      frontCameraController = null;
+    }
+    
+    // medium が失敗した場合、low でフォールバック
+    try {
+      frontCameraController = CameraController(
+        camera, 
+        ResolutionPreset.low, 
         enableAudio: false,
       );
       await frontCameraController?.initialize();
@@ -90,7 +151,7 @@ class LocalCameraService implements BaseCameraService {
       frontCameraController = null;
     }
 
-    if (_cameras.isEmpty) _cameras = await availableCameras();
+    if (_cameras.isEmpty) _cameras = await _safeAvailableCameras();
     if (_cameras.isEmpty) return null;
 
     final selectedOutCamera = _selectBackCamera();

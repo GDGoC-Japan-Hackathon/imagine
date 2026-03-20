@@ -19,6 +19,12 @@ class CameraService implements BaseCameraService {
   bool get isNetworkMode => _isNetworkMode;
   BaseCameraService get _activeService => _isNetworkMode ? _network : _local;
 
+  /// カメラ初期化前に AAOS 環境かどうかを判定します。
+  /// パーミッション要求の制御や MediaPipe デリゲート選択に使用。
+  Future<bool> checkIsAutomotive() async {
+    return await _local.checkIsAutomotive();
+  }
+
   /// ローカルカメラが見つからない場合に自動的にネットワークモードへフォールバックします。
   @override
   Future<void> initialize({bool force = false}) async {
@@ -27,8 +33,13 @@ class CameraService implements BaseCameraService {
       _isNetworkMode = false;
     } catch (e) {
       // ローカルカメラ失敗時にネットワークモードを試行
-      await _network.initialize(force: force);
-      _isNetworkMode = true;
+      try {
+        await _network.initialize(force: force);
+        _isNetworkMode = true;
+      } catch (networkError) {
+        // 両方失敗した場合はローカル側のエラーを再スロー（根本原因を伝えるため）
+        rethrow;
+      }
     }
   }
 

@@ -3,10 +3,16 @@ class AppConstants {
   // --- カメラ関連 (CameraConfig) ---
   static const int defaultManualIndex = -1;
   static const Duration cameraRetryDelay = Duration(seconds: 1);
+  static const Duration cameraRetryDelayAaos = Duration(seconds: 3);
+  static const int cameraRetryCount = 3;
   static const Duration cameraCaptureDelay = Duration(milliseconds: 200);
   static const Duration networkCaptureSwitchDelay = Duration(milliseconds: 1500);
   static const int networkCaptureSkipFrames = 5;
   static const Duration networkCaptureTimeout = Duration(seconds: 4);
+  
+  // --- 初期化リトライ関連 ---
+  static const int maxInitRetryCount = 2;
+  static const Duration initRetryDelay = Duration(seconds: 3);
 
   // --- ビジョン/トラッキング関連 (VisionConfig) ---
   static const int requiredStableFrames = 20; 

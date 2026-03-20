@@ -96,30 +96,36 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     }
   }
 
-  Future<void> _initApp({bool force = false}) async {
+  Future<void> _initApp({bool force = false, int retryCount = 0}) async {
     // 既に初期化処理が進行中の場合は、強制実行(force)でない限りスキップ
     if (_isProcessing && !force) return;
     _isProcessing = true;
     
     try {
-      // 権限をまとめてリクエスト
-      Map<Permission, PermissionStatus> statuses = {};
-      try {
-        statuses = await [
-          Permission.camera,
-          Permission.microphone,
-        ].request();
-      } catch (e) {
-        debugPrint("Permission request failed: $e");
-      }
+      // AAOS判定をカメラ初期化前に行う（パーミッション制御に必要）
+      final isAaos = await _cameraService.checkIsAutomotive();
+      
+      // AAOS環境ではシステムレベルでパーミッションが付与されるため、
+      // permission_handler による動的要求をスキップする（クラッシュ防止）
+      if (!isAaos) {
+        Map<Permission, PermissionStatus> statuses = {};
+        try {
+          statuses = await [
+            Permission.camera,
+            Permission.microphone,
+          ].request();
+        } catch (e) {
+          debugPrint("Permission request failed: $e");
+        }
 
-      if (statuses.isEmpty || statuses[Permission.camera]?.isDenied == true) {
-        setState(() {
-          _statusMessage = "カメラの権限が必要です";
-          _isProcessing = false;
-        });
-        _showErrorSnackBar("カメラの利用が許可されていません（権限設定を確認してください）");
-        return;
+        if (statuses.isNotEmpty && statuses[Permission.camera]?.isDenied == true) {
+          setState(() {
+            _statusMessage = "カメラの権限が必要です";
+            _isProcessing = false;
+          });
+          _showErrorSnackBar("カメラの利用が許可されていません（権限設定を確認してください）");
+          return;
+        }
       }
 
       await _cameraService.initialize(force: force);
@@ -161,7 +167,18 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       _isProcessing = false; // 初期化完了
     } catch (e) {
       _isProcessing = false;
-      debugPrint("Initialization error: $e");
+      debugPrint("Initialization error (attempt ${retryCount + 1}): $e");
+      
+      // AAOS環境ではUSBカメラの準備に時間がかかるため、自動リトライ
+      if (retryCount < AppConstants.maxInitRetryCount) {
+        setState(() => _statusMessage = "カメラに再接続中... (${retryCount + 1}/${AppConstants.maxInitRetryCount})");
+        await Future.delayed(AppConstants.initRetryDelay);
+        if (mounted) {
+          _initApp(force: true, retryCount: retryCount + 1);
+        }
+        return;
+      }
+      
       setState(() => _statusMessage = "カメラの初期化に失敗しました");
       
       final String message = e is AppException ? e.message : "カメラの初期化に失敗しました: $e";
