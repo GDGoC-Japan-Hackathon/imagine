@@ -16,9 +16,9 @@ class AppConstants {
   static const Duration faceLostGracePeriod = Duration(milliseconds: 2000);
   static const Duration mediapipeProcessingInterval = Duration(milliseconds: 30);
 
-  // --- AI/Gemini関連 (AiConfig) ---
-  static const String geminiModelName = 'gemini-2.0-flash'; // 最新モデルへ更新を提案(内部ロジックは変えない)
-  static const String ttsModelName = 'gemini-2.0-pro-tts';
+  // --- Gemini設定 (GeminiService) ---
+  static const String geminiModelName = 'gemini-2.5-flash';
+  static const String ttsModelName = 'gemini-2.5-pro-tts';
   static const String ttsVoiceName = 'Achernar';
   static const String ttsLanguageCode = 'ja-jp';
 
