@@ -17,6 +17,7 @@ import '../camera/services/mediapipe_service.dart';
 import '../camera/models/test_scenery.dart';
 import '../../core/services/sound_service.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../../core/constants/app_constants.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -101,12 +102,17 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     
     try {
       // 権限をまとめてリクエスト
-      final statuses = await [
-        Permission.camera,
-        Permission.microphone,
-      ].request();
+      Map<Permission, PermissionStatus> statuses = {};
+      try {
+        statuses = await [
+          Permission.camera,
+          Permission.microphone,
+        ].request();
+      } catch (e) {
+        debugPrint("Permission request failed: $e");
+      }
 
-      if (statuses[Permission.camera]!.isDenied) {
+      if (statuses.isEmpty || statuses[Permission.camera]?.isDenied == true) {
         setState(() {
           _statusMessage = "カメラの権限が必要です";
           _isProcessing = false;
@@ -128,7 +134,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       _showDebugCamera = dotenv.env['DEBUG_SHOW_CAMERA']?.toLowerCase() == 'true';
       _showDebugFaceImage = dotenv.env['DEBUG_SHOW_FACE_IMAGE']?.toLowerCase() == 'true';
       
-      await _mediapipeService.initialize(debugShowFaceImage: _showDebugFaceImage);
+      // AAOS環境（Raspberry Pi等）ではGPUが不安定なため、CPUデリゲート(0)を優先する
+      final int delegate = _cameraService.isAutomotive ? 0 : 1;
+      await _mediapipeService.initialize(
+        debugShowFaceImage: _showDebugFaceImage,
+        delegate: delegate,
+      );
       
       if (_skipFaceDetection) {
         setState(() => _statusMessage = "自動撮影テスト中...");
@@ -148,13 +159,14 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     }
   }
 
+  /// ユーザーを誘導するためのタイマーを開始します。
   void _startGuidanceTimer() {
     Future.doWhile(() async {
-      await Future.delayed(const Duration(seconds: 1));
+      await Future.delayed(AppConstants.guidanceTimerInterval);
       if (!mounted || _isProcessing || _skipFaceDetection) return false;
       
       final now = DateTime.now();
-      if (now.difference(_lastFaceDetectedTime).inSeconds > 5 && !_hasFaceInFrame) {
+      if (now.difference(_lastFaceDetectedTime).inSeconds > AppConstants.guidanceNoFaceThresholdSeconds && !_hasFaceInFrame) {
         setState(() {
           _statusMessage = "外の景色を眺めてください";
         });
@@ -172,6 +184,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     });
   }
 
+  /// 顔認識とトラッキングロジックを開始します。
   void _startFaceTracking() {
     if (_cameraService.isNetworkMode) {
       if (_cameraService.networkImageStream == null) return;
@@ -183,114 +196,148 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     // MediaPipe からのストリームを購読
     _faceSubscription = _mediapipeService.faceStream.listen((data) {
       if (_isProcessing || !mounted) return;
-
-      // ネストされた Map の型を安全にキャスト
-      final rawLandmarks = data['landmarks'] as List?;
-      final landmarks = rawLandmarks?.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-
-      // デバッグ用画像の更新
-      if (_showDebugFaceImage && data.containsKey('faceImage')) {
-        setState(() {
-          _debugFaceImage = data['faceImage'] as Uint8List?;
-        });
-      }
-
-      if (landmarks == null || landmarks.isEmpty) {
-        // 顔ロスト時の猶予処理
-        final now = DateTime.now();
-        if (_hasFaceInFrame && now.difference(_lastFaceDetectedTime).inMilliseconds > 2000) {
-          if (mounted) {
-            setState(() {
-              _hasFaceInFrame = false;
-            });
-            _orbKey.currentState?.setTracking(false);
-            _orbKey.currentState?.setFaceOffset(null);
-          }
-        }
-        return;
-      }
-
-      // 顔を検出
-      _lastFaceDetectedTime = DateTime.now();
-      if (!_hasFaceInFrame) {
-        setState(() => _hasFaceInFrame = true);
-        _orbKey.currentState?.setTracking(true);
-      }
-
-      // 478個のランドマークから Euler角 (Yaw/Pitch) を簡易推定
-      // Point 4: Nose Tip, Point 152: Chin, Point 33: Left Eye, Point 263: Right Eye
-      final nose = landmarks[4];
-      final eyeLeft = landmarks[33];
-      final eyeRight = landmarks[263];
-      
-      // 顔の幅をユークリッド距離（直線距離）で計算し、顔が傾いていても正確に幅を取得
-      final dx = eyeRight['x'] - eyeLeft['x'];
-      final dy = eyeRight['y'] - eyeLeft['y'];
-      final faceWidth = math.sqrt(dx * dx + dy * dy);
-      if (faceWidth < 0.02) return; // 小さすぎる（遠すぎる）場合はスキップ
-
-      final eyeCenterX = (eyeLeft['x'] + eyeRight['x']) / 2;
-      final yaw = (nose['x'] - eyeCenterX) / faceWidth * 30.0; // 顔の幅で割って正規化
-
-      // 垂直方向も同様。目の高さと鼻の距離
-      final eyeCenterY = (eyeLeft['y'] + eyeRight['y']) / 2;
-      final pitch = (nose['y'] - eyeCenterY) / faceWidth * 30.0;
-
-      final currentFaceVector = FaceVector(yaw, pitch);
-      final stableProgress = _faceTracker.getStableProgress([currentFaceVector]);
-
-      // ロスト復帰や新規認識時にサウンドフラグをリセット
-      if (stableProgress < 0.1) {
-        _didPlayStableSound = false;
-      }
-      
-      // Orbの状態更新
-      final faceOffset = Offset(
-        (yaw / 25.0).clamp(-1.0, 1.0),
-        (pitch / 20.0).clamp(-1.0, 1.0)
-      );
-      _orbKey.currentState?.setFaceOffset(faceOffset);
-      _orbKey.currentState?.setProgress(stableProgress); // プログレスをOrbに渡す
-
-      // 表情の反映
-      final rawBlendshapes = data['blendshapes'] as List?;
-      if (rawBlendshapes != null) {
-        final blendshapes = rawBlendshapes.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-        final scores = { for (var e in blendshapes) e['category'] as String : (e['score'] as num).toDouble() };
-        _orbKey.currentState?.setBlendshapes(scores);
-      }
-
-      if (stableProgress >= 1.0) {
-        if (!_didPlayStableSound) {
-          _playSuccessFeedback();
-          _didPlayStableSound = true;
-        }
-
-        _isProcessing = true;
-        _orbKey.currentState?.setStable(true);
-        _orbKey.currentState?.setProgress(1.0);
-        
-        setState(() {
-          _statusMessage = "気づきをキャッチしました";
-        });
-
-        // 撮影と遷移
-        _captureAndHandleTransition(currentFaceVector);
-      } else if (stableProgress > 0) {
-        final progress = stableProgress.clamp(0.0, 1.0);
-        _orbKey.currentState?.setProgress(progress);
-        setState(() {
-          _statusMessage = "あなたの視線に寄り添っています...";
-        });
-      } else {
-        _orbKey.currentState?.setProgress(0.0);
-        setState(() {
-          _statusMessage = "心の動きを解析しています";
-        });
-      }
+      _handleFaceStreamData(data);
     });
 
-    // カメラストリームの開始と MediaPipe への送信
+    _startImageStreamDetection();
+  }
+
+  /// MediaPipeからのストリームデータを処理します。
+  void _handleFaceStreamData(Map<String, dynamic> data) {
+    // ネストされた Map の型を安全にキャスト
+    final rawLandmarks = data['landmarks'] as List?;
+    final landmarks = rawLandmarks?.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+
+    // デバッグ用画像の更新
+    if (_showDebugFaceImage && data.containsKey('faceImage')) {
+      setState(() {
+        _debugFaceImage = data['faceImage'] as Uint8List?;
+      });
+    }
+
+    if (landmarks == null || landmarks.isEmpty) {
+      _handleFaceLost();
+      return;
+    }
+
+    _handleFaceDetected(landmarks, data);
+  }
+
+  /// 顔をロストした際の猶予処理を行います。
+  void _handleFaceLost() {
+    final now = DateTime.now();
+    if (_hasFaceInFrame && now.difference(_lastFaceDetectedTime) > AppConstants.faceLostGracePeriod) {
+      if (mounted) {
+        setState(() {
+          _hasFaceInFrame = false;
+        });
+        _orbKey.currentState?.setTracking(false);
+        _orbKey.currentState?.setFaceOffset(null);
+      }
+    }
+  }
+
+  /// 検出された顔のランドマークを元にトラッキング状態を更新します。
+  void _handleFaceDetected(List<Map<String, dynamic>> landmarks, Map<String, dynamic> data) {
+    _lastFaceDetectedTime = DateTime.now();
+    if (!_hasFaceInFrame) {
+      setState(() => _hasFaceInFrame = true);
+      _orbKey.currentState?.setTracking(true);
+    }
+
+    // 478個のランドマークから Euler角 (Yaw/Pitch) を簡易推定
+    final currentFaceVector = _estimateFaceVector(landmarks);
+    if (currentFaceVector == null) return;
+
+    final stableProgress = _faceTracker.getStableProgress([currentFaceVector]);
+
+    // ロスト復帰や新規認識時にサウンドフラグをリセット
+    if (stableProgress < 0.1) {
+      _didPlayStableSound = false;
+    }
+    
+    // Orbの状態更新
+    final faceOffset = Offset(
+      (currentFaceVector.x / 25.0).clamp(-1.0, 1.0),
+      (currentFaceVector.y / 20.0).clamp(-1.0, 1.0)
+    );
+    _orbKey.currentState?.setFaceOffset(faceOffset);
+    _orbKey.currentState?.setProgress(stableProgress);
+
+    // 表情の反映
+    final rawBlendshapes = data['blendshapes'] as List?;
+    if (rawBlendshapes != null) {
+      final blendshapes = rawBlendshapes.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      final scores = { for (var e in blendshapes) e['category'] as String : (e['score'] as num).toDouble() };
+      _orbKey.currentState?.setBlendshapes(scores);
+    }
+
+    if (stableProgress >= 1.0) {
+      _triggerSuccessfulDetection(currentFaceVector);
+    } else {
+      _updateStatusByProgress(stableProgress);
+    }
+  }
+
+  /// ランドマークから顔の向き（FaceVector）を推定します。
+  FaceVector? _estimateFaceVector(List<Map<String, dynamic>> landmarks) {
+    // Point 4: Nose Tip, Point 33: Left Eye, Point 263: Right Eye
+    final nose = landmarks[4];
+    final eyeLeft = landmarks[33];
+    final eyeRight = landmarks[263];
+    
+    // 顔の幅をユークリッド距離で計算
+    final dx = eyeRight['x'] - eyeLeft['x'];
+    final dy = eyeRight['y'] - eyeLeft['y'];
+    final faceWidth = math.sqrt(dx * dx + dy * dy);
+    
+    if (faceWidth < AppConstants.faceWidthMinThreshold) return null;
+
+    final eyeCenterX = (eyeLeft['x'] + eyeRight['x']) / 2;
+    final yaw = (nose['x'] - eyeCenterX) / faceWidth * 30.0;
+
+    final eyeCenterY = (eyeLeft['y'] + eyeRight['y']) / 2;
+    final pitch = (nose['y'] - eyeCenterY) / faceWidth * 30.0;
+
+    return FaceVector(yaw, pitch);
+  }
+
+  /// 安定した顔検出が完了した際の処理を行います。
+  void _triggerSuccessfulDetection(FaceVector vector) {
+    if (!_didPlayStableSound) {
+      _playSuccessFeedback();
+      _didPlayStableSound = true;
+    }
+
+    _isProcessing = true;
+    _orbKey.currentState?.setStable(true);
+    _orbKey.currentState?.setProgress(1.0);
+    
+    setState(() {
+      _statusMessage = "気づきをキャッチしました";
+    });
+
+    _captureAndHandleTransition(vector);
+  }
+
+  /// 進捗に応じたステータスメッセージの更新
+  void _updateStatusByProgress(double progress) {
+    if (progress > 0) {
+      final clampedProgress = progress.clamp(0.0, 1.0);
+      _orbKey.currentState?.setProgress(clampedProgress);
+      setState(() {
+        _statusMessage = "あなたの視線に寄り添っています...";
+      });
+    } else {
+      _orbKey.currentState?.setProgress(0.0);
+      setState(() {
+        _statusMessage = "心の動きを解析しています";
+      });
+    }
+  }
+
+  /// カメラストリームの開始とMediaPipeへの継続的な送信を開始します。
+  void _startImageStreamDetection() {
     try {
       if (_isCameraStreaming) return;
       _isCameraStreaming = true;
@@ -300,7 +347,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           if (_isProcessing || _isAnalyzing || !mounted || !_isCameraStreaming) return;
           
           final now = DateTime.now();
-          if (now.difference(_lastAnalysisTime).inMilliseconds < 30) return;
+          if (now.difference(_lastAnalysisTime) < AppConstants.mediapipeProcessingInterval) return;
 
           _isAnalyzing = true;
           _lastAnalysisTime = now;
@@ -317,13 +364,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           if (_isProcessing || _isAnalyzing || !mounted || !_isCameraStreaming) return;
           
           final now = DateTime.now();
-          // 負荷軽減のため処理間隔を空ける (精度向上のため100ms→30msへ短縮)
-          if (now.difference(_lastAnalysisTime).inMilliseconds < 30) return;
+          if (now.difference(_lastAnalysisTime) < AppConstants.mediapipeProcessingInterval) return;
 
           _isAnalyzing = true;
           _lastAnalysisTime = now;
 
-          // MediaPipe (Native) へ送信
           final rotation = _cameraService.inCameraController?.description.sensorOrientation ?? 0;
           _mediapipeService.detect(image, isFront: true, rotation: rotation).then((_) {
             _isAnalyzing = false;
@@ -382,8 +427,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         pageBuilder: (_, _, _) => AnalysisScreen(
           analysisFuture: analysisFuture,
         ),
-        transitionDuration: const Duration(milliseconds: 600),
-        reverseTransitionDuration: const Duration(milliseconds: 400),
+        transitionDuration: AppConstants.screenTransitionDuration,
+        reverseTransitionDuration: AppConstants.reverseTransitionDuration,
         transitionsBuilder: (_, animation, _, child) {
           return FadeTransition(opacity: CurvedAnimation(parent: animation, curve: Curves.easeInOut), child: child);
         },
@@ -751,7 +796,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                                 );
                               },
                               child: Text(
-                                _statusMessage.toUpperCase(), // 認識成功時もステータスは表示
+                                _statusMessage.toUpperCase(),
                                 key: ValueKey<String>(_statusMessage),
                                 style: const TextStyle(
                                   color: Colors.white,
