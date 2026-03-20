@@ -483,6 +483,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         imagePath: outImage.path,
         polygon: polygon,
         audioBytes: audioBytes,
+        latitude: result.latitude,
+        longitude: result.longitude,
       );
     } else {
       throw Exception("撮影に失敗しました。");
