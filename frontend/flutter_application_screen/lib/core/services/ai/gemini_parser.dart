@@ -1,20 +1,19 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import '../models/gemini_analysis_result.dart';
-import '../../../core/errors/exceptions.dart';
+import '../../models/gemini_analysis_result.dart';
+import '../../errors/exceptions.dart';
 
-/// Gemini APIからのレスポンス(JSON)をパースするためのクラス
+/// Gemini API からのレスポンス (JSON) をパースするユーティリティ
 class GeminiParser {
-  /// AI解析結果のJSONをパースします。
+  /// AI による画像解析結果をパースします。
   static GeminiAnalysisResult parseAnalysisResponse(String text) {
     try {
-      final jsonText = cleanJsonResponse(text);
+      final jsonText = _cleanJsonResponse(text);
       final Map<String, dynamic> decoded = jsonDecode(jsonText);
       
       final targetName = decoded["名前"]?.toString() ?? "指定位置の対象物";
       final guideDesc = decoded["解説"]?.toString() ?? "解説を取得できませんでした。";
       
-      // 出力フォーマットに合わせるためのポリゴン処理
       final List<dynamic> polygon = decoded["polygon"] is List ? decoded["polygon"] : [0, 0, 1000, 1000];
       final segData = [ {"polygon": polygon} ];
       
@@ -28,10 +27,10 @@ class GeminiParser {
     }
   }
 
-  /// 音声インテント解析結果のJSONをパースします。
+  /// 音声インテント解析結果をパースします。
   static bool parseVoiceIntentResponse(String text) {
     try {
-      final jsonText = cleanJsonResponse(text);
+      final jsonText = _cleanJsonResponse(text);
       final Map<String, dynamic> decoded = jsonDecode(jsonText);
       return decoded["positive"] == true;
     } catch (e) {
@@ -40,13 +39,11 @@ class GeminiParser {
     }
   }
 
-  /// Markdownのコードブロック(```json ... ```)などが含まれている場合に中身だけを取り出す
-  static String cleanJsonResponse(String text) {
+  static String _cleanJsonResponse(String text) {
     String cleaned = text.trim();
     if (cleaned.startsWith('```')) {
       final lines = cleaned.split('\n');
       if (lines.length > 2) {
-        // 最初の行(```json)と最後の行(```)を除去
         cleaned = lines.sublist(1, lines.length - 1).join('\n');
       }
     }

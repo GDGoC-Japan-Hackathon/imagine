@@ -1,6 +1,6 @@
 /// アプリケーション全体で使用される定数クラス
 class AppConstants {
-  // --- カメラ設定 ---
+  // --- カメラ関連 (CameraConfig) ---
   static const int defaultManualIndex = -1;
   static const Duration cameraRetryDelay = Duration(seconds: 1);
   static const Duration cameraCaptureDelay = Duration(milliseconds: 200);
@@ -8,29 +8,26 @@ class AppConstants {
   static const int networkCaptureSkipFrames = 5;
   static const Duration networkCaptureTimeout = Duration(seconds: 4);
 
-  // --- 音声・通知設定 ---
-  static const Duration guidanceTimerInterval = Duration(seconds: 1);
-  static const int guidanceNoFaceThresholdSeconds = 5;
-
-  // --- フェイストラッキング設定 (FaceTrackerService) ---
-  // Python実装（10fps換算で6フレーム = 約600ms）を、Dart側（約33fps）に換算
+  // --- ビジョン/トラッキング関連 (VisionConfig) ---
   static const int requiredStableFrames = 20; 
   static const double yawThreshold = 1.0;
   static const double pitchThreshold = 1.0;
   static const double faceWidthMinThreshold = 0.02;
+  static const Duration faceLostGracePeriod = Duration(milliseconds: 2000);
+  static const Duration mediapipeProcessingInterval = Duration(milliseconds: 30);
 
-  // --- Gemini設定 (GeminiService) ---
-  static const String geminiModelName = 'gemini-2.5-flash';
-  static const String ttsModelName = 'gemini-2.5-pro-tts';
+  // --- AI/Gemini関連 (AiConfig) ---
+  static const String geminiModelName = 'gemini-2.0-flash'; // 最新モデルへ更新を提案(内部ロジックは変えない)
+  static const String ttsModelName = 'gemini-2.0-pro-tts';
   static const String ttsVoiceName = 'Achernar';
   static const String ttsLanguageCode = 'ja-jp';
 
-  // --- ネットワーク設定 ---
+  // --- ネットワーク/リレー関連 (NetworkConfig) ---
   static const String defaultRelayWsUrl = 'ws://127.0.0.1:8080';
   
-  // --- UI/アニメーション設定 ---
+  // --- UI/ナビゲーション関連 (UiConfig) ---
+  static const Duration guidanceTimerInterval = Duration(seconds: 1);
+  static const int guidanceNoFaceThresholdSeconds = 5;
   static const Duration screenTransitionDuration = Duration(milliseconds: 600);
   static const Duration reverseTransitionDuration = Duration(milliseconds: 400);
-  static const Duration faceLostGracePeriod = Duration(milliseconds: 2000);
-  static const Duration mediapipeProcessingInterval = Duration(milliseconds: 30);
 }

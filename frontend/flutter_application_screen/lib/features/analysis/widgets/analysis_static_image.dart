@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
-import '../analysis_model.dart';
+import '../../../core/models/analysis_model.dart';
 import 'dart:math' as math;
 
 class AnalysisStaticImage extends StatelessWidget {

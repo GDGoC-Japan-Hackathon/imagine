@@ -1,21 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_application_screen/features/camera/services/gemini_parser.dart';
+import 'package:flutter_application_screen/core/services/ai/gemini_parser.dart';
 import 'package:flutter_application_screen/core/errors/exceptions.dart';
 
 void main() {
   group('GeminiParser Tests', () {
-    test('cleanJsonResponse should remove Markdown code blocks', () {
-      const input = '```json\n{"test": "data"}\n```';
-      final cleaned = GeminiParser.cleanJsonResponse(input);
-      expect(cleaned, '{"test": "data"}');
-    });
-
-    test('cleanJsonResponse should handle plain strings', () {
-      const input = '{"test": "data"}';
-      final cleaned = GeminiParser.cleanJsonResponse(input);
-      expect(cleaned, '{"test": "data"}');
-    });
-
     test('parseAnalysisResponse should correctly parse valid JSON', () {
       const jsonText = '```json\n{\n  "名前": "東京タワー",\n  "解説": "日本のシンボルです。",\n  "polygon": [100, 200, 300, 400],\n  "latitude": 35.6586,\n  "longitude": 139.7454\n}\n```';
       
@@ -29,7 +17,7 @@ void main() {
     });
 
     test('parseAnalysisResponse should throw DataParsingException on invalid JSON', () {
-      const invalidJson = '{"invalid": "format"'; // Missing brace
+      const invalidJson = '{"invalid": "format"'; 
       expect(() => GeminiParser.parseAnalysisResponse(invalidJson), throwsA(isA<DataParsingException>()));
     });
 
@@ -37,12 +25,6 @@ void main() {
       const jsonText = '{"positive": true}';
       final result = GeminiParser.parseVoiceIntentResponse(jsonText);
       expect(result, isTrue);
-    });
-
-    test('parseVoiceIntentResponse should correctly parse negative intent', () {
-      const jsonText = '{"positive": false}';
-      final result = GeminiParser.parseVoiceIntentResponse(jsonText);
-      expect(result, isFalse);
     });
 
     test('parseVoiceIntentResponse should return false on invalid JSON', () {

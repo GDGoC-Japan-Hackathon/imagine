@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import '../analysis_model.dart';
+import '../../../core/models/analysis_model.dart';
 import '../../../core/theme/app_colors.dart';
 
 class AnalysisResultCard extends StatelessWidget {

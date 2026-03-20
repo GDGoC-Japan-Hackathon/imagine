@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'analysis_model.dart';
+import '../../core/models/analysis_model.dart';
 import 'widgets/analysis_static_image.dart';
 import 'widgets/analysis_generating_card.dart';
 import 'widgets/analysis_result_card.dart';
@@ -14,7 +14,7 @@ import 'package:record/record.dart';
 import 'package:path/path.dart' as p;
 import '../../core/errors/exceptions.dart';
 import '../../common_widgets/voice_waveform.dart';
-import '../camera/services/gemini_service.dart';
+import '../../core/services/ai/gemini_service.dart';
 import '../../core/services/sound_service.dart';
 
 enum AnalysisPhase { generating, peakPulse, convergence, reveal, complete }

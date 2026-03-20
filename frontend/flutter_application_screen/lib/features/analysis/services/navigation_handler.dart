@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_navigation_flutter/google_navigation_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher_string.dart';
-import '../analysis_model.dart';
+import '../../../core/models/analysis_model.dart';
 
 class NavigationHandler {
   static Future<void> startNavigation({

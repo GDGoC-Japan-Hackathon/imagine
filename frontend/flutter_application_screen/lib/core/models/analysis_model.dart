@@ -1,14 +1,13 @@
 import 'dart:typed_data';
 
-enum AnalysisPhase { generating, peakPulse, convergence, reveal, complete }
-
+/// 分析結果の表示に使用するデータモデル
 class AnalysisData {
   final String tag;
   final String title;
   final String subtitle;
   final String description;
   final String imagePath;
-  final List<double>? polygon; // Gemini returns [y, x, y, x, ...]
+  final List<double>? polygon;
   final Uint8List? audioBytes;
   final double? latitude;
   final double? longitude;
