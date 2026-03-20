@@ -8,6 +8,15 @@ import 'dart:async';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:google_navigation_flutter/google_navigation_flutter.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:url_launcher/url_launcher_string.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
+import 'package:path/path.dart' as p;
+import '../../common_widgets/voice_waveform.dart';
+import '../camera/services/gemini_service.dart';
+import '../../core/services/sound_service.dart';
 
 enum AnalysisPhase { generating, peakPulse, convergence, reveal, complete }
 
@@ -32,6 +41,12 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
   // Result tracking
   bool _isNavigatingBack = false;
+  bool _isListening = false;
+  double _currentAmplitude = -60.0;
+  final AudioRecorder _recorder = AudioRecorder();
+  final GeminiService _geminiService = GeminiService(); 
+  StreamSubscription? _amplitudeSub;
+  Timer? _listeningTimeoutTimer;
 
   final AudioPlayer _audioPlayer = AudioPlayer();
   StreamSubscription? _playerCompleteSubscription;
@@ -99,6 +114,12 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
       ),
     );
 
+    // .env から GeminiService を再初期化 (Dashboardで初期化済みだが、画面遷移後も使えるように)
+    _geminiService.initialize(
+      dotenv.env['GEMINI_API_KEY'] ?? '',
+      dotenv.env['GOOGLE_SERVICE_ACCOUNT_JSON'] ?? '',
+    );
+
     _transitionController.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
         setState(() {
@@ -127,7 +148,11 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
     }
 
     _playerCompleteSubscription = _audioPlayer.onPlayerComplete.listen((_) {
-      _startAutoExitTimer(const Duration(seconds: 3));
+      if (_data.latitude != null && _data.longitude != null) {
+        _startVoiceIntentDetection();
+      } else {
+        _startAutoExitTimer(const Duration(seconds: 3));
+      }
     });
   }
 
@@ -174,10 +199,105 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
   void _startAutoExitTimer(Duration delay) {
     _autoExitTimer?.cancel();
     _autoExitTimer = Timer(delay, () {
-      if (mounted) {
+      if (mounted && !_isListening) {
         _navigateToDashboard();
       }
     });
+  }
+
+  Future<void> _startVoiceIntentDetection() async {
+    if (_isListening) return;
+
+    try {
+      if (await _recorder.hasPermission()) {
+        final tempDir = await getTemporaryDirectory();
+        final path = p.join(tempDir.path, 'intent_record.m4a');
+        
+        final file = File(path);
+        if (await file.exists()) {
+          await file.delete();
+        }
+
+        setState(() {
+          _isListening = true;
+          _currentAmplitude = -60.0;
+        });
+        
+        // 録音開始 (AAC/m4a)
+        await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: path);
+
+        // 録音開始の合図としてシステム通知音を再生
+        SoundService.playVoiceStart();
+
+        // VAD (Voice Activity Detection): 声が途切れたら自動停止
+        DateTime lastSoundTime = DateTime.now();
+        _amplitudeSub = _recorder.onAmplitudeChanged(const Duration(milliseconds: 50)).listen((amp) {
+          if (mounted) {
+            setState(() {
+              _currentAmplitude = amp.current;
+            });
+            
+            // しきい値 -40dB 以上の入力があれば「声」とみなす
+            if (amp.current > -40) {
+              lastSoundTime = DateTime.now();
+            } else {
+              // 1.5秒以上沈黙が続いたら、発話終了とみなして停止
+              if (DateTime.now().difference(lastSoundTime).inMilliseconds > 1500) {
+                 _stopAndProcessVoiceIntent();
+              }
+            }
+          }
+        });
+
+        // 最大10秒のタイムアウトを設定（誰も話さない場合など）
+        _listeningTimeoutTimer = Timer(const Duration(seconds: 3), () {
+          if (mounted && _isListening) {
+             _stopAndProcessVoiceIntent();
+          }
+        });
+
+      } else {
+        _startAutoExitTimer(const Duration(seconds: 3));
+      }
+    } catch (e) {
+      debugPrint("Error in voice intent detection: $e");
+      if (mounted) {
+        setState(() => _isListening = false);
+        _navigateToDashboard();
+      }
+    }
+  }
+
+  Future<void> _stopAndProcessVoiceIntent() async {
+    if (!_isListening) return;
+
+    _amplitudeSub?.cancel();
+    _listeningTimeoutTimer?.cancel();
+
+    // 録音停止
+    final recordPath = await _recorder.stop();
+    if (!mounted) return;
+    
+    setState(() => _isListening = false);
+
+    if (recordPath != null) {
+      final audioBytes = await File(recordPath).readAsBytes();
+      
+      // Geminiで意図判定
+      final isPositive = await _geminiService.classifyVoiceIntent(audioBytes);
+      
+      if (mounted) {
+        if (isPositive) {
+          debugPrint("Voice Intent: Positive -> Starting Navigation");
+          _startNavigation();
+        } else {
+          debugPrint("Voice Intent: Negative or Neutral -> Returning to Dashboard");
+          _navigateToDashboard();
+        }
+      }
+    } else {
+      _navigateToDashboard();
+    }
   }
 
   // Removed _initAutoReturnTracking and _startFaceTracking functionality
@@ -189,6 +309,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
     _autoExitTimer?.cancel();
     _audioPlayer.dispose();
     _infoScrollController.dispose();
+    _recorder.dispose(); // Recorderの破棄
+    _amplitudeSub?.cancel();
+    _listeningTimeoutTimer?.cancel();
     super.dispose();
   }
 
@@ -202,8 +325,161 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
     _isNavigatingBack = true;
     _autoExitTimer?.cancel();
 
+    if (_isListening) {
+      _recorder.stop();
+      _isListening = false;
+      _amplitudeSub?.cancel();
+      _listeningTimeoutTimer?.cancel();
+    }
+
     if (mounted) {
       Navigator.of(context).pop(result);
+    }
+  }
+
+  Future<void> _startNavigation() async {
+    // TTS再生中の場合は停止
+    await _audioPlayer.stop();
+    _autoExitTimer?.cancel(); // 安全のためここでもキャンセル
+
+    if (_isListening) {
+      _recorder.stop();
+      _isListening = false;
+      _amplitudeSub?.cancel();
+      _listeningTimeoutTimer?.cancel();
+    }
+
+    if (_data.latitude == null || _data.longitude == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ナビゲーション用の座標が取得できていません。')),
+        );
+      }
+      return;
+    }
+
+    // GASが使えない場合などでマップアプリを直接呼び出すための geo スキームを優先
+    final intentUrl = 'geo:${_data.latitude},${_data.longitude}?q=${_data.latitude},${_data.longitude}';
+    final googleNavUrl = 'google.navigation:q=${_data.latitude},${_data.longitude}';
+    
+    // SDK方式を試みる
+    try {
+      // 0. 位置情報パーミッションの確認
+      var status = await Permission.location.status;
+      if (!status.isGranted) {
+        status = await Permission.location.request();
+        if (!status.isGranted) {
+          // パーミッション拒否時はIntent方式へフォールバック
+          await _launchIntent(intentUrl, googleNavUrl);
+          return;
+        }
+      }
+
+      // 1. 利用規約の確認と表示
+      if (!await GoogleMapsNavigator.areTermsAccepted()) {
+        final accepted = await GoogleMapsNavigator.showTermsAndConditionsDialog(
+          'Google Maps Navigation SDK 利用規約',
+          'ナビゲーション機能を利用するには、Google Maps Platform の利用規約に同意する必要があります。',
+        );
+        if (!accepted) {
+          // 利用規約に同意しない場合は、Intent方式へフォールバック
+          await _launchIntent(intentUrl, googleNavUrl);
+          return;
+        }
+      }
+
+      // 2. ナビゲーションセッションの初期化
+      // タイムアウトを設定して、応答がない場合にIntentへフォールバック
+      await GoogleMapsNavigator.initializeNavigationSession().timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw TimeoutException('Navigation initialization timed out'),
+      );
+      
+      final waypoint = NavigationWaypoint.withLatLngTarget(
+        title: _data.title,
+        target: LatLng(latitude: _data.latitude!, longitude: _data.longitude!),
+      );
+
+      final destinations = Destinations(
+        waypoints: [waypoint],
+        displayOptions: NavigationDisplayOptions(),
+      );
+
+      // 3. ナビゲーション画面を表示するための画面遷移
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => Scaffold(
+              appBar: AppBar(title: Text('${_data.title} への案内')),
+              body: GoogleMapsNavigationView(
+                onViewCreated: (controller) async {
+                  final navigator = Navigator.of(context);
+                  try {
+                    // ルート計算の状態を確認
+                    final status = await GoogleMapsNavigator.setDestinations(destinations).timeout(
+                      const Duration(seconds: 15),
+                      onTimeout: () => throw TimeoutException('Routing timed out'),
+                    );
+
+                    if (status == NavigationRouteStatus.statusOk) {
+                      await GoogleMapsNavigator.startGuidance();
+                    } else {
+                      debugPrint("Routing failed with status: $status. Fallback to Intent.");
+                      if (navigator.mounted) navigator.pop();
+                      await _launchIntent(intentUrl, googleNavUrl);
+                    }
+                  } catch (e) {
+                    debugPrint("SDK View Error: $e. Fallback to Intent.");
+                    if (navigator.mounted) navigator.pop();
+                    await _launchIntent(intentUrl, googleNavUrl);
+                  }
+                },
+              ),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      // 400エラーやタイムアウトなどの例外をキャッチ
+      debugPrint("SDK Error: $e. Fallback to Intent.");
+      await _launchIntent(intentUrl, googleNavUrl);
+    }
+  }
+
+  Future<void> _launchIntent(String url, String fallbackUrl) async {
+    try {
+      // LaunchMode.externalNonBrowserApplication を指定して強制的にブラウザ以外（マップアプリ）で開く
+      if (await canLaunchUrlString(url)) {
+        await launchUrlString(
+          url,
+          mode: LaunchMode.externalNonBrowserApplication,
+        );
+        // Intent開始後は解析画面を閉じてダッシュボードに戻る
+        if (mounted) {
+          Navigator.of(context).pop();
+        }
+      } else if (await canLaunchUrlString(fallbackUrl)) {
+        await launchUrlString(
+          fallbackUrl,
+          mode: LaunchMode.externalNonBrowserApplication,
+        );
+        if (mounted) Navigator.of(context).pop();
+      } else {
+        // 最後の手段: https URL
+        final httpsUrl = 'https://www.google.com/maps/dir/?api=1&destination=${_data.latitude},${_data.longitude}&travelmode=driving';
+        if (await canLaunchUrlString(httpsUrl)) {
+          await launchUrlString(httpsUrl);
+          if (mounted) Navigator.of(context).pop();
+        } else {
+          throw 'Could not launch navigation';
+        }
+      }
+    } catch (e) {
+      debugPrint("Intent Error: $e");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('ナビゲーションの開始に失敗しました: $e')),
+      );
     }
   }
 
@@ -228,6 +504,22 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
               );
             },
           ),
+          
+          // ボトムのGeminiライクな波形表示 (録音中のみ)
+          if (_isListening)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 40,
+              child: FadeTransition(
+                opacity: _contentFade,
+                child: VoiceWaveform(
+                  amplitude: _currentAmplitude,
+                  isListening: _isListening,
+                ),
+              ),
+            ),
+
           // 右上の「×」ボタン（結果表示またはエラー表示以降に出現）
           if (_phase == AnalysisPhase.complete || _phase == AnalysisPhase.reveal)
             Positioned(
@@ -825,30 +1117,38 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
         const SizedBox(height: 12),
         
         // Navigate there
-        Container(
-          width: double.infinity,
-          height: 56,
-          decoration: BoxDecoration(
-            color: const Color(0xFFFF895D), // Salmon color from screen.png
-            borderRadius: BorderRadius.circular(28),
-          ),
-          child: const Center(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.navigation_outlined, color: Colors.white),
-                  SizedBox(width: 12),
-                  Text(
-                    "Navigate there",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16,
+        GestureDetector(
+          onTap: () {
+            _autoExitTimer?.cancel(); // 自動戻りをキャンセル
+            _startNavigation();
+          },
+          child: Container(
+            width: double.infinity,
+            height: 56,
+            decoration: BoxDecoration(
+              color: (_data.latitude != null && _data.longitude != null) 
+                  ? const Color(0xFFFF895D) 
+                  : Colors.grey.shade400,
+              borderRadius: BorderRadius.circular(28),
+            ),
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.navigation_outlined, color: Colors.white),
+                    const SizedBox(width: 12),
+                    Text(
+                      _data.latitude != null ? "Navigate there" : "Location unknown",
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

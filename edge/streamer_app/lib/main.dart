@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'streamer_screen.dart';
 
@@ -7,6 +8,11 @@ import 'streamer_screen.dart';
 /// Dashboard (AAOS 側) はフロントエンドの flutter_application_screen を参照してください。
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // アプリを横画面（Landscape）に固定
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]);
   await dotenv.load(fileName: ".env");
   runApp(const StreamerApp());
 }

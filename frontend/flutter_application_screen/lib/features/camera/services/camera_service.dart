@@ -64,31 +64,26 @@ class CameraService {
     // .envから手動インデックス設定を取得
     final int manualInIndex = int.tryParse(dotenv.env['IN_CAMERA_INDEX'] ?? '-1') ?? -1;
     
-    if (_isAutomotiveCache && manualInIndex != -1 && manualInIndex < _cameras.length) {
+    if (manualInIndex != -1 && manualInIndex < _cameras.length) {
       // 手動指定がある場合はそれを優先
       selectedInCamera = _cameras[manualInIndex];
+    } else if (_cameras.length <= 1) {
+      // カメラが1台しかない場合は、その唯一のカメラを使用
+      selectedInCamera = _cameras.first;
     } else if (_isAutomotiveCache) {
       // Android Automotive (車載機) の場合のオートロジック
-      // 1台以下ならUSBカメラ等の external を優先。それ以外はドライブレコーダー相当（front/back）を優先。
-      if (_cameras.length <= 1) {
-        selectedInCamera = _cameras.firstWhere(
-          (c) => c.lensDirection == CameraLensDirection.external,
-          orElse: () => _cameras.first,
-        );
-      } else {
-        selectedInCamera = _cameras.firstWhere(
-          (c) => c.lensDirection == CameraLensDirection.front,
-          orElse: () => _cameras.firstWhere(
-            (c) => c.lensDirection == CameraLensDirection.back,
-            orElse: () => _cameras.first,
-          ),
-        );
-      }
-    } else {
-      // スマートフォン単体の場合のロジック（従来通りフロント優先）
       selectedInCamera = _cameras.firstWhere(
         (c) => c.lensDirection == CameraLensDirection.front,
-        orElse: () => _cameras.length > 1 ? _cameras[1] : _cameras.first,
+        orElse: () => _cameras.firstWhere(
+          (c) => c.lensDirection == CameraLensDirection.external,
+          orElse: () => _cameras.first,
+        ),
+      );
+    } else {
+      // スマートフォン単体等の場合のロジック（フロント優先）
+      selectedInCamera = _cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.front,
+        orElse: () => _cameras.first,
       );
     }
     
@@ -158,17 +153,23 @@ class CameraService {
     // .envから手動インデックス設定を取得
     final int manualOutIndex = int.tryParse(dotenv.env['OUT_CAMERA_INDEX'] ?? '-1') ?? -1;
 
-    if (_isAutomotiveCache && manualOutIndex != -1 && manualOutIndex < _cameras.length) {
+    if (manualOutIndex != -1 && manualOutIndex < _cameras.length) {
       // 手動指定がある場合はそれを優先
       selectedOutCamera = _cameras[manualOutIndex];
-    } else if (_isAutomotiveCache && _cameras.length <= 1) {
-      // 車載機でカメラが1台しかない場合は同じカメラを使う
+    } else if (_cameras.length <= 1) {
+      // カメラが1台しかない場合は同じカメラを使う
+      selectedOutCamera = _cameras.first;
+    } else if (_isAutomotiveCache) {
+      // 車載機の場合は back よりも external を優先して探す
       selectedOutCamera = _cameras.firstWhere(
         (c) => c.lensDirection == CameraLensDirection.external,
-        orElse: () => _cameras.first,
+        orElse: () => _cameras.firstWhere(
+          (c) => c.lensDirection == CameraLensDirection.back,
+          orElse: () => _cameras.first,
+        ),
       );
     } else {
-      // 2. 風景保存用のアウトカメラを探して初期化します
+      // 一般デバイスの場合は back を優先
       selectedOutCamera = _cameras.firstWhere(
         (c) => c.lensDirection == CameraLensDirection.back,
         orElse: () => _cameras.first,

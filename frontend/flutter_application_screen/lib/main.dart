@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'core/theme/app_theme.dart';
@@ -11,6 +12,11 @@ import 'features/dashboard/dashboard_screen.dart';
 /// 詳細は backend/streamer_app/README.md を参照してください。
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // アプリを横画面（Landscape）に固定
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]);
   await dotenv.load(fileName: ".env");
   runApp(
     const ProviderScope(
@@ -25,6 +31,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'Omni Vision Concierge',
       theme: AppTheme.lightTheme,
       home: const DashboardScreen(),

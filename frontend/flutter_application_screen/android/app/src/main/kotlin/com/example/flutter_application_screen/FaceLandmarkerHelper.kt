@@ -73,12 +73,12 @@ class FaceLandmarkerHelper(
             else -> 0
         }
         
-        // センサーの物理的な固定回転（rotation）からデバイスの傾き（degrees）を相殺し、
+        // センサーの物理的な固定回転（rotation）からデバイスの傾き（degrees）を考慮し、
         // 常に顔が上を向くようにターゲットの回転角度を計算する
         val targetRotation = if (isFrontCamera) {
-            (rotation - degrees + 360) % 360
-        } else {
             (rotation + degrees) % 360
+        } else {
+            (rotation - degrees + 360) % 360
         }
 
         // Rotate and Flip according to calculated target rotation

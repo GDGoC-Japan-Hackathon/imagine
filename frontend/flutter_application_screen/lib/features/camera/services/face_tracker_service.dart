@@ -8,46 +8,46 @@ class FaceTrackerService {
 
   // Python実装（10fps換算で6フレーム = 約600ms）を、Dart側（約33fps）に換算して20フレームとして設定
   static const int _requiredStableFrames = 20; 
-  static const double _yawThreshold = 3.0;
-  static const double _pitchThreshold = 3.0;
+  static const double _yawThreshold = 1.0;
+  static const double _pitchThreshold = 1.0;
 
-  final Map<int, FaceVector> _lastFaceVectors = {};
+  // 安定判定の基準となる位置（アンカー）を保持
+  final Map<int, FaceVector> _anchorFaceVectors = {};
   final Map<int, int> _stableCounts = {};
 
-  bool _isGazeNotMoving(FaceVector? currentAngles, FaceVector? previousAngles) {
-    if (currentAngles == null || previousAngles == null) return false;
+  bool _isWithinStaringRange(FaceVector? currentAngles, FaceVector? anchorAngles) {
+    if (currentAngles == null || anchorAngles == null) return false;
 
-    final dx = (currentAngles.x - previousAngles.x).abs();
-    final dy = (currentAngles.y - previousAngles.y).abs();
+    final dx = (currentAngles.x - anchorAngles.x).abs();
+    final dy = (currentAngles.y - anchorAngles.y).abs();
     
-    // Euler角の差分が両方とも3.0度以内の場合のみ安定とみなす
+    // Euler角（相当）の基準点からの差分が閾値以内の場合のみ安定とみなす
+    // フレーム間比較ではなく、注視開始点との比較にすることでドリフトを防止
     return dx <= _yawThreshold && dy <= _pitchThreshold;
   }
 
   /// 現在の安定度合いを 0.0 ~ 1.0 で返す
   double getStableProgress(List<FaceVector> anglesList) {
     if (anglesList.isEmpty) {
-      _lastFaceVectors.clear();
+      _anchorFaceVectors.clear();
       _stableCounts.clear();
       return 0.0;
     }
 
     double maxProgress = 0.0;
-  // 人の顔の数だけ判定する
+    // 人の顔の数だけ判定する
     for (int i = 0; i < anglesList.length; i++) {
       final currentAngles = anglesList[i];
-      final prevAngles = _lastFaceVectors[i];
+      final anchorAngles = _anchorFaceVectors[i];
 
-      // 顔の向きが前フレームから動いていないかを判定
-      if (_isGazeNotMoving(currentAngles, prevAngles)) {
+      // 顔の向きが安定開始時の位置から大きく動いていないかを判定
+      if (_isWithinStaringRange(currentAngles, anchorAngles)) {
         _stableCounts[i] = (_stableCounts[i] ?? 0) + 1;
       } else {
-        // 動いた瞬間にカウントをリセット（厳格化）
+        // 閾値を超えた瞬間にカウントをリセットし、現在地を新しいアンカーに設定
         _stableCounts[i] = 0;
+        _anchorFaceVectors[i] = currentAngles;
       }
-
-      // 次回判定用に更新
-      _lastFaceVectors[i] = currentAngles;
 
       final count = _stableCounts[i] ?? 0;
       // 連続フレーム数を進捗としてプロット（UI表示用）
@@ -56,7 +56,7 @@ class FaceTrackerService {
     }
 
     // フレームから消えた顔のステートを削除する
-    _lastFaceVectors.removeWhere((key, _) => key >= anglesList.length);
+    _anchorFaceVectors.removeWhere((key, _) => key >= anglesList.length);
     _stableCounts.removeWhere((key, _) => key >= anglesList.length);
 
     return maxProgress;
@@ -73,7 +73,8 @@ class FaceTrackerService {
   }
 
   void reset() {
-    _lastFaceVectors.clear();
+    _anchorFaceVectors.clear();
     _stableCounts.clear();
   }
 }
+

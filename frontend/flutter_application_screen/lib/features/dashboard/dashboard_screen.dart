@@ -15,6 +15,7 @@ import '../camera/services/face_tracker_service.dart';
 import '../camera/services/gemini_service.dart';
 import '../camera/services/mediapipe_service.dart';
 import '../camera/models/test_scenery.dart';
+import '../../core/services/sound_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -120,6 +121,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     } catch (e) {
       debugPrint("Initialization error: $e");
       setState(() => _statusMessage = "カメラの初期化に失敗しました");
+      // カメラ初期化失敗時、SnackBarにてエラーを表示する
+      _showErrorSnackBar("カメラの初期化に失敗しました: $e");
     }
   }
 
@@ -317,8 +320,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   void _playSuccessFeedback() {
     // 成功時のサウンドと振動
     HapticFeedback.heavyImpact();
-    SystemSound.play(SystemSoundType.click);
-    // Note: audioplayaers でカスタムサウンドを鳴らす場合はここで Source を再生
+    // Android システムサウンド: カメラAFロック音（FOCUS_COMPLETE）
+    SoundService.playFaceDetected();
   }
 
   Future<void> _captureAndHandleTransition(FaceVector targetVector) async {
@@ -376,7 +379,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         
         // Android特有の "Dead Thread" 問題を回避するため、
         // 戻ってきた時は強制的にカメラコントローラーを破棄して再作成する
-        _initApp(force: true);
+        try {
+          _initApp(force: true);
+        } catch (e) {
+          debugPrint("Error re-initializing app: $e");
+          _showErrorSnackBar("アプリの再初期化に失敗しました: $e");
+        }
       }
     });
   }
@@ -386,6 +394,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       _isProcessing = false;
       _didPlayStableSound = false;
       _hasFaceInFrame = false;
+      _statusMessage = "景色に注目してください"; // ステータスも初期状態にリセット
     });
     _faceTracker.reset();
     _orbKey.currentState?.setTracking(false);
@@ -473,7 +482,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       }
 
       // 音声データの取得 (TTS)
-      final audioBytes = await _geminiService.synthesizeSpeech(result.guideDesc);
+      String ttsText = result.guideDesc;
+      if (result.latitude != null && result.longitude != null) {
+        ttsText += " 。。。 この場所に行きたいですか？";
+      }
+      final audioBytes = await _geminiService.synthesizeSpeech(ttsText);
 
       return AnalysisData(
         tag: "AI RECOGNITION",
@@ -483,6 +496,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         imagePath: outImage.path,
         polygon: polygon,
         audioBytes: audioBytes,
+        latitude: result.latitude,
+        longitude: result.longitude,
       );
     } else {
       throw Exception("撮影に失敗しました。");
@@ -714,7 +729,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                                 );
                               },
                               child: Text(
-                                _statusMessage.toUpperCase(),
+                                _statusMessage.toUpperCase(), // 認識成功時もステータスは表示
                                 key: ValueKey<String>(_statusMessage),
                                 style: const TextStyle(
                                   color: Colors.white,
@@ -744,8 +759,8 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                           );
                         },
                         child: Text(
-                          _hasFaceInFrame ? "そのまま数秒間、視線を固定してください" : "気になるものを見つめるとAIが解説します",
-                          key: ValueKey<bool>(_hasFaceInFrame),
+                          _isProcessing ? "" : (_hasFaceInFrame ? "そのまま数秒間、視線を固定してください" : "気になるものを見つめるとAIが解説します"), // 認識成功時のみ非表示
+                          key: ValueKey<bool>(_isProcessing || _hasFaceInFrame),
                           style: const TextStyle(
                             color: Colors.white60,
                             fontSize: 12,

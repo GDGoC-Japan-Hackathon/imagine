@@ -8,8 +8,10 @@ class GeminiAnalysisResult {
   final String targetName;
   final String guideDesc;
   final List<dynamic> segData;
+  final double? latitude;
+  final double? longitude;
 
-  GeminiAnalysisResult(this.targetName, this.guideDesc, this.segData);
+  GeminiAnalysisResult(this.targetName, this.guideDesc, this.segData, {this.latitude, this.longitude});
 }
 
 class GeminiService {
@@ -54,7 +56,9 @@ $locationDesc
 {
     "名前": "対象物の具体的な名称",
     "解説": "こちらに写っておりますのは…から始まるような、丁寧で詳細な解説文",
-    "polygon": [ymin, xmin, ymax, xmax]
+    "polygon": [ymin, xmin, ymax, xmax],
+    "latitude": 付近の緯度 (数値、不明な場合は null),
+    "longitude": 付近の経度 (数値、不明な場合は null)
 }
 ※ polygon は対象物を実際に囲む 0 から 1000 までの正規化座標 [y_min, x_min, y_max, x_max] の4つの数値の配列です。
 ''';
@@ -77,7 +81,10 @@ $locationDesc
       final List<dynamic> polygon = decoded["polygon"] ?? [0, 0, 1000, 1000];
       final segData = [ {"polygon": polygon} ];
       
-      return GeminiAnalysisResult(targetName, guideDesc, segData);
+      final latitude = decoded["latitude"] is num ? (decoded["latitude"] as num).toDouble() : null;
+      final longitude = decoded["longitude"] is num ? (decoded["longitude"] as num).toDouble() : null;
+      
+      return GeminiAnalysisResult(targetName, guideDesc, segData, latitude: latitude, longitude: longitude);
     } catch (e) {
       return GeminiAnalysisResult(
         "認識エラー", 
@@ -168,6 +175,44 @@ $locationDesc
       debugPrint("TTS Request failed or Auth failed: $e");
     }
     return null;
+  }
+
+  Future<bool> classifyVoiceIntent(Uint8List audioBytes) async {
+    final prompt = '''
+あなたは優秀なアシスタントです。
+提供された音声を聞き、ユーザーが目的地へ「行きたい（肯定・承諾）」と考えているか、「行きたくない・今は不要（否定・拒否）」と考えているかを正確に判定してください。
+
+判定基準：
+- 肯定的（はい、お願いします、行きたい、Yes、OKなど） -> "positive": true
+- 否定的（いいえ、大丈夫です、結構です、Noなど） -> "positive": false
+- 判断がつかない、または無音の場合 -> "positive": false
+
+出力は以下のJSON形式のみとし、Markdownは一切含めないでください。
+{
+  "positive": boolean
+}
+''';
+
+    final content = [
+      Content.multi([
+        TextPart(prompt),
+        DataPart('audio/aac', audioBytes), // record パッケージのデフォルト (Android/iOS) は m4a/aac 形式
+      ])
+    ];
+
+    try {
+      final response = await _model!.generateContent(
+        content,
+        generationConfig: GenerationConfig(responseMimeType: "application/json"),
+      );
+
+      final jsonText = _cleanJsonResponse(response.text ?? "{}");
+      final decoded = jsonDecode(jsonText);
+      return decoded["positive"] == true;
+    } catch (e) {
+      debugPrint("Voice intent classification failed: $e");
+      return false;
+    }
   }
 }
 

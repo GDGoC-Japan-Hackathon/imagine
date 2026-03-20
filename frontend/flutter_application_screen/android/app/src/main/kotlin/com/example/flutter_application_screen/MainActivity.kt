@@ -5,6 +5,8 @@ import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
+import android.media.MediaActionSound
+import android.media.RingtoneManager
 import android.os.Bundle
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.EventChannel
@@ -217,6 +219,28 @@ class MainActivity : FlutterActivity() {
                     "isAutomotiveOS" -> {
                         val isAutomotive = packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_AUTOMOTIVE)
                         result.success(isAutomotive)
+                    }
+                    // 顔認識成功時のシステムサウンド（カメラのAFロック音）
+                    "playFaceDetected" -> {
+                        try {
+                            val sound = MediaActionSound()
+                            sound.play(MediaActionSound.FOCUS_COMPLETE)
+                            result.success(null)
+                        } catch (e: Exception) {
+                            Log.w("Sound", "playFaceDetected failed: ${e.message}")
+                            result.success(null) // エラーでも続行
+                        }
+                    }
+                    // 音声録音開始時のシステムサウンド（通知音）
+                    "playVoiceStart" -> {
+                        try {
+                            val sound = MediaActionSound()
+                            sound.play(MediaActionSound.FOCUS_COMPLETE)
+                            result.success(null)
+                        } catch (e: Exception) {
+                            Log.w("Sound", "playVoiceStart failed: ${e.message}")
+                            result.success(null) // エラーでも続行
+                        }
                     }
                     else -> result.notImplemented()
                 }
