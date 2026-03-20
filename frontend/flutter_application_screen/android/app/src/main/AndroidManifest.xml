@@ -17,6 +17,12 @@
     <uses-feature
         android:name="android.hardware.camera.any"
         android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera.external"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera.autofocus"
+        android:required="false" />
 
     <application
         android:label="flutter_application_screen"

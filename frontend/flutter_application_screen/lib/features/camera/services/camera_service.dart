@@ -36,15 +36,23 @@ class CameraService {
     await dispose();
     
     _cameras = await availableCameras();
+    
+    // USBカメラの認識に時間がかかる場合があるため、空なら一度だけリトライ
+    if (_cameras.isEmpty) {
+      debugPrint("No cameras found. Retrying in 1s...");
+      await Future.delayed(const Duration(seconds: 1));
+      _cameras = await availableCameras();
+    }
+
     debugPrint("===== CAMERA INIT DEBUG =====");
     debugPrint("Found ${_cameras.length} cameras available.");
     for (var i = 0; i < _cameras.length; i++) {
-      debugPrint("Camera $i: ${_cameras[i].name}, direction: ${_cameras[i].lensDirection}");
+        debugPrint("Index $i: name=${_cameras[i].name}, lens=${_cameras[i].lensDirection}, sensorOrientation=${_cameras[i].sensorOrientation}");
     }
     debugPrint("=============================");
 
     if (_cameras.isEmpty) {
-      debugPrint("No cameras found. Falling back to Network WebSocket Mode.");
+      debugPrint("No cameras found after retry. Falling back to Network WebSocket Mode.");
       isNetworkMode = true;
       _networkStreamController = StreamController<Uint8List>.broadcast();
       _connectToRelay();
@@ -71,11 +79,11 @@ class CameraService {
       // カメラが1台しかない場合は、その唯一のカメラを使用
       selectedInCamera = _cameras.first;
     } else if (_isAutomotiveCache) {
-      // Android Automotive (車載機) の場合のオートロジック
+      // Android Automotive (車載機) の場合のオートロジック: USBカメラ(external)を最優先
       selectedInCamera = _cameras.firstWhere(
-        (c) => c.lensDirection == CameraLensDirection.front,
+        (c) => c.lensDirection == CameraLensDirection.external,
         orElse: () => _cameras.firstWhere(
-          (c) => c.lensDirection == CameraLensDirection.external,
+          (c) => c.lensDirection == CameraLensDirection.front,
           orElse: () => _cameras.first,
         ),
       );

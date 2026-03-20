@@ -16,6 +16,7 @@ import '../camera/services/gemini_service.dart';
 import '../camera/services/mediapipe_service.dart';
 import '../camera/models/test_scenery.dart';
 import '../../core/services/sound_service.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -95,6 +96,17 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
 
   Future<void> _initApp({bool force = false}) async {
     try {
+      // 権限のリクエスト (AAOSでは明示的なリクエストが必要な場合がある)
+      final status = await Permission.camera.request();
+      if (status.isDenied) {
+        setState(() => _statusMessage = "カメラの権限が必要です");
+        _showErrorSnackBar("カメラの利用が許可されていません（権限設定を確認してください）");
+        return;
+      }
+      
+      // 音声も権限リクエスト
+      await Permission.microphone.request();
+
       await _cameraService.initialize(force: force);
       _isCameraInitialized = true;
 
