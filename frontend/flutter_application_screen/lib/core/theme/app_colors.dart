@@ -21,7 +21,7 @@ class AppColors {
   static const Color textSecondary = Color(0xFF6E7E8B); // Subtitle/secondary text
 
   // Analysis Screen Colors (Light Theme)
-  static const Color cardBackground = Colors.white;
+  static const Color cardBackground = Color(0xFFFFFFFF);
   static const Color surfaceLight = Color(0xFFF7F9FA); // Very light greyish-blue for app background
   static const Color navItemActive = Color(0xFF11D76B); // Strong green for active nav
   

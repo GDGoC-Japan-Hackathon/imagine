@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+enum AnalysisPhase { generating, peakPulse, convergence, reveal, complete }
+
 class AnalysisData {
   final String tag;
   final String title;
