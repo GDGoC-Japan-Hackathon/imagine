@@ -8,9 +8,8 @@ class TestScenery {
   const TestScenery(this.assetPath, this.targetVector);
 
   static const List<TestScenery> items = [
-    TestScenery('assets/test_tokyo_tower.jpg', FaceVector(5.0, -10.0)),
-    TestScenery('assets/test_fuji.jpg', FaceVector(-15.0, 5.0)),
-    TestScenery('assets/test_shrine.jpg', FaceVector(0.0, 0.0)),
+    TestScenery('assets/tokyo_place.png', FaceVector(0, 0)),
+    // TestScenery('assets/tokyo_place.png', FaceVector(-15, -15)),
   ];
 
   static TestScenery getRandom() {
