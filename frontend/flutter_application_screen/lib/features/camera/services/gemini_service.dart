@@ -3,23 +3,35 @@ import 'dart:io';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:flutter/foundation.dart';
 import 'package:googleapis_auth/auth_io.dart' as auth;
+import '../../../core/constants/app_constants.dart';
 
+/// Gemini APIによる画像解析結果を保持するクラス。
 class GeminiAnalysisResult {
+  /// 対象物の名前
   final String targetName;
+  /// 対象物の詳細な解説
   final String guideDesc;
+  /// セグメンテーション用データ（ポリゴン情報など）
   final List<dynamic> segData;
+  /// 付近の緯度
   final double? latitude;
+  /// 付近の経度
   final double? longitude;
 
   GeminiAnalysisResult(this.targetName, this.guideDesc, this.segData, {this.latitude, this.longitude});
 }
 
+/// Gemini APIとのやり取りを担当するサービス。
+/// 画像解析、テキスト読み上げ(TTS)、音声インテント分類
 class GeminiService {
   GenerativeModel? _model;
   String? _serviceAccountJson;
-  // 最新安定版の Flash モデル 'gemini-2.5-flash' を指定
-  final String modelName = 'gemini-2.5-flash'; 
+  
+  /// 使用するGeminiモデル名
+  final String modelName = AppConstants.geminiModelName; 
 
+  /// サービスを初期化
+  /// [geminiKey] APIキー, [serviceAccountJson] Google Cloud サービスアカウントJSON
   void initialize(String geminiKey, String? serviceAccountJson) {
     _serviceAccountJson = serviceAccountJson;
     _model ??= GenerativeModel(
@@ -28,6 +40,8 @@ class GeminiService {
     );
   }
 
+  /// 画像を解析して対象物の特定と座標の推測を行う
+  /// [imageFile] 解析対象の画像, [pan] カメラの水平角度, [tilt] カメラの垂直角度
   Future<GeminiAnalysisResult> analyzeAndMask(File imageFile, double pan, double tilt) async {
     // 座標のパーセント変換・正規化 
     // カメラの一般的な画角(FOV)を考慮してマッピング (例: 水平60度, 垂直45度)
@@ -39,7 +53,43 @@ class GeminiService {
     
     String locationDesc = "画像の左端から ${percentX.clamp(0.0, 100.0).toStringAsFixed(1)}%、上端から ${percentY.clamp(0.0, 100.0).toStringAsFixed(1)}% の位置（正規化座標で [y, x] = [$normY, $normX] 付近）";
 
-    final prompt = '''
+    final prompt = _buildAnalysisPrompt(locationDesc);
+
+    final bytes = await imageFile.readAsBytes();
+    final content = [Content.multi([TextPart(prompt), DataPart('image/jpeg', bytes)])];
+
+    try {
+      final response = await _model!.generateContent(
+        content,
+        generationConfig: GenerationConfig(responseMimeType: "application/json"),
+      );
+
+      final jsonText = _cleanJsonResponse(response.text ?? "{}");
+      final Map<String, dynamic> decoded = jsonDecode(jsonText);
+      
+      final targetName = decoded["名前"]?.toString() ?? "指定位置の対象物";
+      final guideDesc = decoded["解説"]?.toString() ?? "解説を取得できませんでした。";
+      
+      // 出力フォーマットに合わせるためのポリゴン処理
+      final List<dynamic> polygon = decoded["polygon"] is List ? decoded["polygon"] : [0, 0, 1000, 1000];
+      final segData = [ {"polygon": polygon} ];
+      
+      final double? latitude = decoded["latitude"] is num ? (decoded["latitude"] as num).toDouble() : null;
+      final double? longitude = decoded["longitude"] is num ? (decoded["longitude"] as num).toDouble() : null;
+      
+      return GeminiAnalysisResult(targetName, guideDesc, segData, latitude: latitude, longitude: longitude);
+    } catch (e) {
+      debugPrint("Gemini analysis failed: $e");
+      return GeminiAnalysisResult(
+        "認識エラー", 
+        "解説の取得に失敗しました。", 
+        [ {"polygon": [0, 0, 1000, 1000]} ]
+      );
+    }
+  }
+
+  String _buildAnalysisPrompt(String locationDesc) {
+    return '''
 あなたは優秀で知識豊富なコンシェルジュ（パーソナルアシスタント）です。
 提供された画像を注意深く観察し、指定された位置にある【単一の対象物】を見つけ、ユーザーへ丁寧に説明する魅力的で専門的な解説を作成してください。
 
@@ -62,36 +112,6 @@ $locationDesc
 }
 ※ polygon は対象物を実際に囲む 0 から 1000 までの正規化座標 [y_min, x_min, y_max, x_max] の4つの数値の配列です。
 ''';
-
-    final bytes = await imageFile.readAsBytes();
-    final content = [Content.multi([TextPart(prompt), DataPart('image/jpeg', bytes)])];
-
-    final response = await _model!.generateContent(
-      content,
-      generationConfig: GenerationConfig(responseMimeType: "application/json"),
-    );
-
-    try {
-      final jsonText = _cleanJsonResponse(response.text ?? "{}");
-      final decoded = jsonDecode(jsonText);
-      
-      final targetName = decoded["名前"] ?? "指定位置の対象物";
-      final guideDesc = decoded["解説"] ?? "解説を取得できませんでした。";
-      // dashboard_screen が期待する形式に合わせるためラップする
-      final List<dynamic> polygon = decoded["polygon"] ?? [0, 0, 1000, 1000];
-      final segData = [ {"polygon": polygon} ];
-      
-      final latitude = decoded["latitude"] is num ? (decoded["latitude"] as num).toDouble() : null;
-      final longitude = decoded["longitude"] is num ? (decoded["longitude"] as num).toDouble() : null;
-      
-      return GeminiAnalysisResult(targetName, guideDesc, segData, latitude: latitude, longitude: longitude);
-    } catch (e) {
-      return GeminiAnalysisResult(
-        "認識エラー", 
-        "解説の取得に失敗しました。", 
-        [ {"polygon": [0, 0, 1000, 1000]} ]
-      );
-    }
   }
 
   /// Markdownのコードブロック(```json ... ```)などが含まれている場合に中身だけを取り出す
@@ -107,6 +127,8 @@ $locationDesc
     return cleaned;
   }
 
+  /// テキストを音声に変換(TTS)します。
+  /// [text] 読み上げるテキスト。成功した場合は音声データのバイト列を返す
   Future<Uint8List?> synthesizeSpeech(String text) async {
     String? jsonStr = _serviceAccountJson;
     if (jsonStr == null || jsonStr.isEmpty) {
@@ -121,11 +143,9 @@ $locationDesc
     if (firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace) {
       jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
     } else {
-      debugPrint("TTS OAuth Error: Valid JSON part ( { ... } ) not found in string. Content starts with: ${jsonStr.length > 20 ? jsonStr.substring(0, 20) : jsonStr}");
+      debugPrint("TTS OAuth Error: Valid JSON part ( { ... } ) not found in string.");
       return null;
     }
-
-    debugPrint("TTS OAuth Info: JSON string extracted (length: ${jsonStr.length})");
 
     try {
       final accountCredentials = auth.ServiceAccountCredentials.fromJson(jsonStr);
@@ -135,22 +155,7 @@ $locationDesc
       final authClient = await auth.clientViaServiceAccount(accountCredentials, scopes);
 
       final url = Uri.parse('https://texttospeech.googleapis.com/v1beta1/text:synthesize');
-      final Map<String, dynamic> requestBody = {
-        "audioConfig": {
-          "audioEncoding": "MP3",
-          "pitch": 0,
-          "speakingRate": 1
-        },
-        "input": {
-          "prompt": "バスの添乗員のような明るくハキハキした声",
-          "text": text
-        },
-        "voice": {
-          "languageCode": "ja-jp",
-          "modelName": "gemini-2.5-pro-tts",
-          "name": "Achernar"
-        }
-      };
+      final Map<String, dynamic> requestBody = _buildTtsRequestBody(text);
 
       try {
         final response = await authClient.post(
@@ -177,8 +182,54 @@ $locationDesc
     return null;
   }
 
+  Map<String, dynamic> _buildTtsRequestBody(String text) {
+    return {
+      "audioConfig": {
+        "audioEncoding": "MP3",
+        "pitch": 0,
+        "speakingRate": 1
+      },
+      "input": {
+        "prompt": "バスの添乗員のような明るくハキハキした声",
+        "text": text
+      },
+      "voice": {
+        "languageCode": AppConstants.ttsLanguageCode,
+        "modelName": AppConstants.ttsModelName,
+        "name": AppConstants.ttsVoiceName
+      }
+    };
+  }
+
+  /// ユーザーの音声入力から目的地の追加の意思（Yes/No）を分類
+  /// [audioBytes] 録音された音声データ。
   Future<bool> classifyVoiceIntent(Uint8List audioBytes) async {
-    final prompt = '''
+    final prompt = _buildVoiceIntentPrompt();
+
+    final content = [
+      Content.multi([
+        TextPart(prompt),
+        DataPart('audio/aac', audioBytes), 
+      ])
+    ];
+
+    try {
+      final response = await _model!.generateContent(
+        content,
+        generationConfig: GenerationConfig(responseMimeType: "application/json"),
+      );
+
+      final jsonText = _cleanJsonResponse(response.text ?? "{}");
+      final Map<String, dynamic> decoded = jsonDecode(jsonText);
+      return decoded["positive"] == true;
+    } catch (e) {
+      debugPrint("Voice intent classification failed: $e");
+      return false;
+    }
+  }
+
+  String _buildVoiceIntentPrompt() {
+    return '''
 あなたは優秀なアシスタントです。
 提供された音声を聞き、ユーザーが目的地へ「行きたい（肯定・承諾）」と考えているか、「行きたくない・今は不要（否定・拒否）」と考えているかを正確に判定してください。
 
@@ -192,27 +243,6 @@ $locationDesc
   "positive": boolean
 }
 ''';
-
-    final content = [
-      Content.multi([
-        TextPart(prompt),
-        DataPart('audio/aac', audioBytes), // record パッケージのデフォルト (Android/iOS) は m4a/aac 形式
-      ])
-    ];
-
-    try {
-      final response = await _model!.generateContent(
-        content,
-        generationConfig: GenerationConfig(responseMimeType: "application/json"),
-      );
-
-      final jsonText = _cleanJsonResponse(response.text ?? "{}");
-      final decoded = jsonDecode(jsonText);
-      return decoded["positive"] == true;
-    } catch (e) {
-      debugPrint("Voice intent classification failed: $e");
-      return false;
-    }
   }
 }
 
