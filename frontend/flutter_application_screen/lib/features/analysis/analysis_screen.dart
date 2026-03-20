@@ -8,6 +8,8 @@ import 'dart:async';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:google_navigation_flutter/google_navigation_flutter.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 enum AnalysisPhase { generating, peakPulse, convergence, reveal, complete }
 
@@ -204,6 +206,83 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
     if (mounted) {
       Navigator.of(context).pop(result);
+    }
+  }
+
+  Future<void> _startNavigation() async {
+    // TTS再生中の場合は停止
+    await _audioPlayer.stop();
+    _autoExitTimer?.cancel(); // 安全のためここでもキャンセル
+
+    if (_data.latitude == null || _data.longitude == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ナビゲーション用の座標が取得できていません。')),
+      );
+      return;
+    }
+
+    // ナビゲーションセッションの初期化
+    try {
+      // 0. 位置情報パーミッションの確認
+      var status = await Permission.location.status;
+      if (!status.isGranted) {
+        status = await Permission.location.request();
+        if (!status.isGranted) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('ナビゲーションには位置情報の許可が必要です。')),
+            );
+          }
+          return;
+        }
+      }
+
+      // 1. 利用規約の確認と表示
+      if (!await GoogleMapsNavigator.areTermsAccepted()) {
+        final accepted = await GoogleMapsNavigator.showTermsAndConditionsDialog(
+          'Google Maps Navigation SDK 利用規約',
+          'ナビゲーション機能を利用するには、Google Maps Platform の利用規約に同意する必要があります。',
+        );
+        if (!accepted) return;
+      }
+
+      // 2. ナビゲーションセッションの初期化
+      // 位置情報のパーミッション確認などは通常必要ですが、SDKの初期化を試みます
+      await GoogleMapsNavigator.initializeNavigationSession();
+      
+      final waypoint = NavigationWaypoint.withLatLngTarget(
+        title: _data.title,
+        target: LatLng(latitude: _data.latitude!, longitude: _data.longitude!),
+      );
+
+      final destinations = Destinations(
+        waypoints: [waypoint],
+        displayOptions: NavigationDisplayOptions(),
+      );
+
+      // 3. ナビゲーション画面を表示するための画面遷移
+      if (mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => Scaffold(
+              appBar: AppBar(title: Text('${_data.title} への案内')),
+              body: GoogleMapsNavigationView(
+                onViewCreated: (controller) async {
+                  await GoogleMapsNavigator.setDestinations(destinations);
+                  await GoogleMapsNavigator.startGuidance();
+                },
+              ),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint("Navigation Error: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('ナビゲーションの開始に失敗しました: $e')),
+        );
+      }
     }
   }
 
@@ -825,30 +904,38 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
         const SizedBox(height: 12),
         
         // Navigate there
-        Container(
-          width: double.infinity,
-          height: 56,
-          decoration: BoxDecoration(
-            color: const Color(0xFFFF895D), // Salmon color from screen.png
-            borderRadius: BorderRadius.circular(28),
-          ),
-          child: const Center(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.navigation_outlined, color: Colors.white),
-                  SizedBox(width: 12),
-                  Text(
-                    "Navigate there",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16,
+        GestureDetector(
+          onTap: () {
+            _autoExitTimer?.cancel(); // 自動戻りをキャンセル
+            _startNavigation();
+          },
+          child: Container(
+            width: double.infinity,
+            height: 56,
+            decoration: BoxDecoration(
+              color: (_data.latitude != null && _data.longitude != null) 
+                  ? const Color(0xFFFF895D) 
+                  : Colors.grey.shade400,
+              borderRadius: BorderRadius.circular(28),
+            ),
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.navigation_outlined, color: Colors.white),
+                    const SizedBox(width: 12),
+                    Text(
+                      _data.latitude != null ? "Navigate there" : "Location unknown",
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

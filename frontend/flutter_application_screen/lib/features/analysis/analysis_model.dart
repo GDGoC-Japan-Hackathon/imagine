@@ -8,6 +8,8 @@ class AnalysisData {
   final String imagePath;
   final List<double>? polygon; // Gemini returns [y, x, y, x, ...]
   final Uint8List? audioBytes;
+  final double? latitude;
+  final double? longitude;
 
   const AnalysisData({
     required this.tag,
@@ -17,6 +19,8 @@ class AnalysisData {
     required this.imagePath,
     this.polygon,
     this.audioBytes,
+    this.latitude,
+    this.longitude,
   });
 
   static const defaultData = AnalysisData(
