@@ -19,6 +19,8 @@ import java.io.IOException
 import android.view.WindowManager
 import com.google.mediapipe.framework.image.MPImage
 import com.google.mediapipe.framework.image.BitmapExtractor
+import com.google.android.gms.common.GoogleApiAvailability
+import com.google.android.gms.common.ConnectionResult
 
 class MainActivity : FlutterActivity() {
     private val METHOD_CHANNEL = "com.example.imagine/mediapipe"
@@ -235,6 +237,17 @@ class MainActivity : FlutterActivity() {
                     "isAutomotiveOS" -> {
                         val isAutomotive = packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_AUTOMOTIVE)
                         result.success(isAutomotive)
+                    }
+                    // GMS（Google Mobile Services）の利用可否チェック
+                    "isGmsAvailable" -> {
+                        try {
+                            val availability = GoogleApiAvailability.getInstance()
+                            val resultCode = availability.isGooglePlayServicesAvailable(this)
+                            result.success(resultCode == ConnectionResult.SUCCESS)
+                        } catch (e: Exception) {
+                            Log.w("GMS", "isGmsAvailable check failed: ${e.message}")
+                            result.success(false)
+                        }
                     }
                     // 顔認識成功時のシステムサウンド（カメラのAFロック音）
                     "playFaceDetected" -> {

@@ -1,11 +1,29 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_navigation_flutter/google_navigation_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import '../../../core/models/analysis_model.dart';
 
+/// ナビゲーション機能を管理するハンドラ。
+/// GMS（Google Mobile Services）が利用可能な場合は Navigation SDK を使用し、
+/// 利用不可の場合は Intent ベースのフォールバックを自動的に行う。
 class NavigationHandler {
+  static const MethodChannel _channel = MethodChannel('com.example.imagine/mediapipe');
+
+  /// GMS が利用可能かどうかをネイティブ側で確認する。
+  /// AAOS（Raspberry Pi 等）では GMS が無いため false を返す。
+  static Future<bool> _isGmsAvailable() async {
+    try {
+      final result = await _channel.invokeMethod('isGmsAvailable');
+      return result == true;
+    } catch (e) {
+      debugPrint("GMS availability check failed: $e");
+      return false;
+    }
+  }
+
   static Future<void> startNavigation({
     required BuildContext context,
     required AnalysisData data,
@@ -26,6 +44,17 @@ class NavigationHandler {
     final googleNavUrl = 'google.navigation:q=${data.latitude},${data.longitude}';
     final httpsUrl = 'https://www.google.com/maps/dir/?api=1&destination=${data.latitude},${data.longitude}&travelmode=driving';
     
+    // GMS が利用不可の場合は、SDK ルートを完全にスキップして Intent にフォールバック
+    final gmsAvailable = await _isGmsAvailable();
+    if (!gmsAvailable) {
+      debugPrint("GMS not available. Skipping Navigation SDK, falling back to Intent.");
+      if (context.mounted) {
+        await _launchIntent(context, intentUrl, googleNavUrl, httpsUrl);
+      }
+      return;
+    }
+
+    // GMS が利用可能な場合は、Navigation SDK を使用
     try {
       var status = await Permission.location.status;
       if (!status.isGranted) {

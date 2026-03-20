@@ -69,5 +69,6 @@ flutter {
 
 dependencies {
     implementation("com.google.mediapipe:tasks-vision:0.10.32")
+    implementation("com.google.android.gms:play-services-base:18.5.0")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
