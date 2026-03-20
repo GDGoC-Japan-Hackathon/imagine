@@ -26,6 +26,7 @@ class LocalCameraService implements BaseCameraService {
   Future<bool> checkIsAutomotive() async {
     try {
       _isAutomotive = await _channel.invokeMethod('isAutomotiveOS') ?? false;
+      debugPrint("Is Automotive OS check: $_isAutomotive");
     } catch (e) {
       debugPrint("Failed to check automotive OS: $e");
       _isAutomotive = false;
@@ -44,15 +45,18 @@ class LocalCameraService implements BaseCameraService {
       await checkIsAutomotive();
     }
     
-    // AAOS環境ではUSBカメラの認識に時間がかかるため、リトライ回数を増やす
+    // AAOSやRaspberry Pi環境ではUSBカメラの認識に時間がかかるため、
+    // 判定に関わらず一定回数のリトライを行うように修正
     _cameras = await _safeAvailableCameras();
     
     if (_cameras.isEmpty) {
-      final retryCount = _isAutomotive ? AppConstants.cameraRetryCount : 1;
+      // Raspberry Pi AAOSを考慮し、デフォルトのリトライ回数を増やす
+      final retryCount = _isAutomotive ? AppConstants.cameraRetryCount : 2; 
       final retryDelay = _isAutomotive ? AppConstants.cameraRetryDelayAaos : AppConstants.cameraRetryDelay;
       
+      debugPrint("カメラが見つからないためリトライを開始します (isAutomotive: $_isAutomotive)");
       for (int i = 0; i < retryCount && _cameras.isEmpty; i++) {
-        debugPrint("カメラ検出リトライ (${i + 1}/$retryCount)...");
+        debugPrint("カメラ検出リトライ (${i + 1}/$retryCount)... 待機時間: ${retryDelay.inSeconds}秒");
         await Future.delayed(retryDelay);
         _cameras = await _safeAvailableCameras();
       }
@@ -73,7 +77,13 @@ class LocalCameraService implements BaseCameraService {
   /// PlatformException が発生するため、空リストを返すようにする。
   Future<List<CameraDescription>> _safeAvailableCameras() async {
     try {
-      return await availableCameras();
+      final cameras = await availableCameras();
+      debugPrint("検出されたカメラ数: ${cameras.length}");
+      for (var i = 0; i < cameras.length; i++) {
+        final c = cameras[i];
+        debugPrint("カメラ[$i]: ${c.name}, ${c.lensDirection}, ${c.sensorOrientation}");
+      }
+      return cameras;
     } on PlatformException catch (e) {
       debugPrint("availableCameras() PlatformException: ${e.message}");
       return [];
@@ -127,18 +137,15 @@ class LocalCameraService implements BaseCameraService {
       return _cameras[manualInIndex];
     } else if (_cameras.length <= 1) {
       return _cameras.first;
-    } else if (_isAutomotive) {
+    } else {
+      // USBカメラ (external) を優先し、なければ front を探す
+      // Raspberry Pi AAOSではUSBカメラが外部として認識されるケースが多いため
       return _cameras.firstWhere(
         (c) => c.lensDirection == CameraLensDirection.external,
         orElse: () => _cameras.firstWhere(
           (c) => c.lensDirection == CameraLensDirection.front,
           orElse: () => _cameras.first,
         ),
-      );
-    } else {
-      return _cameras.firstWhere(
-        (c) => c.lensDirection == CameraLensDirection.front,
-        orElse: () => _cameras.first,
       );
     }
   }
@@ -183,18 +190,14 @@ class LocalCameraService implements BaseCameraService {
       return _cameras[manualOutIndex];
     } else if (_cameras.length <= 1) {
       return _cameras.first;
-    } else if (_isAutomotive) {
+    } else {
+      // 外部カメラ (USB) を優先し、なければ back を探す
       return _cameras.firstWhere(
         (c) => c.lensDirection == CameraLensDirection.external,
         orElse: () => _cameras.firstWhere(
           (c) => c.lensDirection == CameraLensDirection.back,
           orElse: () => _cameras.first,
         ),
-      );
-    } else {
-      return _cameras.firstWhere(
-        (c) => c.lensDirection == CameraLensDirection.back,
-        orElse: () => _cameras.first,
       );
     }
   }
