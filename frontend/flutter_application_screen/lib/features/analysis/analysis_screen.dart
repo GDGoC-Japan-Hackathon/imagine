@@ -407,7 +407,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
       // 3. ナビゲーション画面を表示するための画面遷移
       if (mounted) {
-        Navigator.of(context).pushReplacement(
+        // ナビゲーション画面を普通に開く
+        await Navigator.of(context).push(
           MaterialPageRoute(
             builder: (context) => Scaffold(
               appBar: AppBar(title: Text('${_data.title} への案内')),
@@ -438,6 +439,10 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
             ),
           ),
         );
+        // ナビゲーション画面が閉じられたら、解析画面（自身）も閉じてダッシュボードに戻る
+        if (mounted) {
+          Navigator.of(context).pop();
+        }
       }
     } catch (e) {
       // 400エラーやタイムアウトなどの例外をキャッチ
