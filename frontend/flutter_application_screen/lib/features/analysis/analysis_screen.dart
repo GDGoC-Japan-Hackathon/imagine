@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:path/path.dart' as p;
+import '../../common_widgets/voice_waveform.dart';
 import '../camera/services/gemini_service.dart';
 
 enum AnalysisPhase { generating, peakPulse, convergence, reveal, complete }
@@ -40,8 +41,11 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
   // Result tracking
   bool _isNavigatingBack = false;
   bool _isListening = false;
+  double _currentAmplitude = -60.0;
   final AudioRecorder _recorder = AudioRecorder();
-  final GeminiService _geminiService = GeminiService(); // すでにDashboardで初期化されているがServiceクラスなので再初期化でもステートは保持される前提か、またはプロバイダ経由が望ましいが現状に合わせる
+  final GeminiService _geminiService = GeminiService(); 
+  StreamSubscription? _amplitudeSub;
+  Timer? _listeningTimeoutTimer;
 
   final AudioPlayer _audioPlayer = AudioPlayer();
   StreamSubscription? _playerCompleteSubscription;
@@ -208,47 +212,47 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
         final tempDir = await getTemporaryDirectory();
         final path = p.join(tempDir.path, 'intent_record.m4a');
         
-        // 以前のファイルがあれば削除
         final file = File(path);
         if (await file.exists()) {
           await file.delete();
         }
 
-        setState(() => _isListening = true);
+        setState(() {
+          _isListening = true;
+          _currentAmplitude = -60.0;
+        });
         
         // 録音開始 (AAC/m4a)
         await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: path);
 
-        // 3秒間待機
-        await Future.delayed(const Duration(seconds: 3));
-
-        if (!mounted || !_isListening) return;
-
-        // 録音停止
-        final recordPath = await _recorder.stop();
-        setState(() => _isListening = false);
-
-        if (recordPath != null) {
-          final audioBytes = await File(recordPath).readAsBytes();
-          
-          // Geminiで意図判定
-          final isPositive = await _geminiService.classifyVoiceIntent(audioBytes);
-          
+        // VAD (Voice Activity Detection): 声が途切れたら自動停止
+        DateTime lastSoundTime = DateTime.now();
+        _amplitudeSub = _recorder.onAmplitudeChanged(const Duration(milliseconds: 50)).listen((amp) {
           if (mounted) {
-            if (isPositive) {
-              debugPrint("Voice Intent: Positive -> Starting Navigation");
-              _startNavigation();
+            setState(() {
+              _currentAmplitude = amp.current;
+            });
+            
+            // しきい値 -40dB 以上の入力があれば「声」とみなす
+            if (amp.current > -40) {
+              lastSoundTime = DateTime.now();
             } else {
-              debugPrint("Voice Intent: Negative or Neutral -> Returning to Dashboard");
-              _navigateToDashboard();
+              // 1.5秒以上沈黙が続いたら、発話終了とみなして停止
+              if (DateTime.now().difference(lastSoundTime).inMilliseconds > 1500) {
+                 _stopAndProcessVoiceIntent();
+              }
             }
           }
-        } else {
-          // 録音データがない場合はダッシュボードに戻る
-          _navigateToDashboard();
-        }
+        });
+
+        // 最大10秒のタイムアウトを設定（誰も話さない場合など）
+        _listeningTimeoutTimer = Timer(const Duration(seconds: 3), () {
+          if (mounted && _isListening) {
+             _stopAndProcessVoiceIntent();
+          }
+        });
+
       } else {
-        // 権限がない場合は通常通り3秒待って戻る
         _startAutoExitTimer(const Duration(seconds: 3));
       }
     } catch (e) {
@@ -257,6 +261,38 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
         setState(() => _isListening = false);
         _navigateToDashboard();
       }
+    }
+  }
+
+  Future<void> _stopAndProcessVoiceIntent() async {
+    if (!_isListening) return;
+
+    _amplitudeSub?.cancel();
+    _listeningTimeoutTimer?.cancel();
+
+    // 録音停止
+    final recordPath = await _recorder.stop();
+    if (!mounted) return;
+    
+    setState(() => _isListening = false);
+
+    if (recordPath != null) {
+      final audioBytes = await File(recordPath).readAsBytes();
+      
+      // Geminiで意図判定
+      final isPositive = await _geminiService.classifyVoiceIntent(audioBytes);
+      
+      if (mounted) {
+        if (isPositive) {
+          debugPrint("Voice Intent: Positive -> Starting Navigation");
+          _startNavigation();
+        } else {
+          debugPrint("Voice Intent: Negative or Neutral -> Returning to Dashboard");
+          _navigateToDashboard();
+        }
+      }
+    } else {
+      _navigateToDashboard();
     }
   }
 
@@ -270,6 +306,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
     _audioPlayer.dispose();
     _infoScrollController.dispose();
     _recorder.dispose(); // Recorderの破棄
+    _amplitudeSub?.cancel();
+    _listeningTimeoutTimer?.cancel();
     super.dispose();
   }
 
@@ -286,6 +324,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
     if (_isListening) {
       _recorder.stop();
       _isListening = false;
+      _amplitudeSub?.cancel();
+      _listeningTimeoutTimer?.cancel();
     }
 
     if (mounted) {
@@ -301,6 +341,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
     if (_isListening) {
       _recorder.stop();
       _isListening = false;
+      _amplitudeSub?.cancel();
+      _listeningTimeoutTimer?.cancel();
     }
 
     if (_data.latitude == null || _data.longitude == null) {
@@ -458,6 +500,22 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
               );
             },
           ),
+          
+          // ボトムのGeminiライクな波形表示 (録音中のみ)
+          if (_isListening)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 40,
+              child: FadeTransition(
+                opacity: _contentFade,
+                child: VoiceWaveform(
+                  amplitude: _currentAmplitude,
+                  isListening: _isListening,
+                ),
+              ),
+            ),
+
           // 右上の「×」ボタン（結果表示またはエラー表示以降に出現）
           if (_phase == AnalysisPhase.complete || _phase == AnalysisPhase.reveal)
             Positioned(
