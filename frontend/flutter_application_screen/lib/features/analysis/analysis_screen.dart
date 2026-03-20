@@ -406,8 +406,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
                 child: GestureDetector(
                   onTap: () => _navigateToDashboard(),
                   child: Container(
-                    width: 44,
-                    height: 44,
+                    width: 53, // 44 * 1.2
+                    height: 53, // 44 * 1.2
                     decoration: BoxDecoration(
                       color: Colors.white.withValues(alpha: 0.9),
                       shape: BoxShape.circle,
@@ -419,7 +419,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
                         )
                       ],
                     ),
-                    child: const Icon(Icons.close, color: AppColors.textPrimary, size: 24),
+                    child: const Icon(Icons.close, color: AppColors.textPrimary, size: 29), // 24 * 1.2
                   ),
                 ),
               ),
