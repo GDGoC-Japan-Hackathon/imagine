@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_application_screen/features/camera/services/gemini_parser.dart';
-import 'package:flutter_application_screen/features/camera/models/gemini_analysis_result.dart';
 import 'package:flutter_application_screen/core/errors/exceptions.dart';
 
 void main() {
