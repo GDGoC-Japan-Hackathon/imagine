@@ -85,11 +85,11 @@ jobs:
       - name: Build APK
         run: flutter build apk --debug
 
-      - name: Rename APK
+      - name: Copy APK to workspace root
         run: |
-          mv build/app/outputs/flutter-apk/app-debug.apk \
-             imagine-${{ github.run_number }}.apk
-
+          cp build/app/outputs/flutter-apk/app-debug.apk \
+             $GITHUB_WORKSPACE/imagine-${{ github.run_number }}.apk
+      
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
