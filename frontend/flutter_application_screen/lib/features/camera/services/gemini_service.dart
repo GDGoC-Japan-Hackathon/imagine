@@ -176,5 +176,43 @@ $locationDesc
     }
     return null;
   }
+
+  Future<bool> classifyVoiceIntent(Uint8List audioBytes) async {
+    final prompt = '''
+あなたは優秀なアシスタントです。
+提供された音声を聞き、ユーザーが目的地へ「行きたい（肯定・承諾）」と考えているか、「行きたくない・今は不要（否定・拒否）」と考えているかを正確に判定してください。
+
+判定基準：
+- 肯定的（はい、お願いします、行きたい、Yes、OKなど） -> "positive": true
+- 否定的（いいえ、大丈夫です、結構です、Noなど） -> "positive": false
+- 判断がつかない、または無音の場合 -> "positive": false
+
+出力は以下のJSON形式のみとし、Markdownは一切含めないでください。
+{
+  "positive": boolean
+}
+''';
+
+    final content = [
+      Content.multi([
+        TextPart(prompt),
+        DataPart('audio/aac', audioBytes), // record パッケージのデフォルト (Android/iOS) は m4a/aac 形式
+      ])
+    ];
+
+    try {
+      final response = await _model!.generateContent(
+        content,
+        generationConfig: GenerationConfig(responseMimeType: "application/json"),
+      );
+
+      final jsonText = _cleanJsonResponse(response.text ?? "{}");
+      final decoded = jsonDecode(jsonText);
+      return decoded["positive"] == true;
+    } catch (e) {
+      debugPrint("Voice intent classification failed: $e");
+      return false;
+    }
+  }
 }
 

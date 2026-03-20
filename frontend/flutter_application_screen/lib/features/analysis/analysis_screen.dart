@@ -11,6 +11,10 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:google_navigation_flutter/google_navigation_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher_string.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
+import 'package:path/path.dart' as p;
+import '../camera/services/gemini_service.dart';
 
 enum AnalysisPhase { generating, peakPulse, convergence, reveal, complete }
 
@@ -35,6 +39,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
 
   // Result tracking
   bool _isNavigatingBack = false;
+  bool _isListening = false;
+  final AudioRecorder _recorder = AudioRecorder();
+  final GeminiService _geminiService = GeminiService(); // すでにDashboardで初期化されているがServiceクラスなので再初期化でもステートは保持される前提か、またはプロバイダ経由が望ましいが現状に合わせる
 
   final AudioPlayer _audioPlayer = AudioPlayer();
   StreamSubscription? _playerCompleteSubscription;
@@ -102,6 +109,12 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
       ),
     );
 
+    // .env から GeminiService を再初期化 (Dashboardで初期化済みだが、画面遷移後も使えるように)
+    _geminiService.initialize(
+      dotenv.env['GEMINI_API_KEY'] ?? '',
+      dotenv.env['GOOGLE_SERVICE_ACCOUNT_JSON'] ?? '',
+    );
+
     _transitionController.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
         setState(() {
@@ -130,7 +143,11 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
     }
 
     _playerCompleteSubscription = _audioPlayer.onPlayerComplete.listen((_) {
-      _startAutoExitTimer(const Duration(seconds: 3));
+      if (_data.latitude != null && _data.longitude != null) {
+        _startVoiceIntentDetection();
+      } else {
+        _startAutoExitTimer(const Duration(seconds: 3));
+      }
     });
   }
 
@@ -177,10 +194,70 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
   void _startAutoExitTimer(Duration delay) {
     _autoExitTimer?.cancel();
     _autoExitTimer = Timer(delay, () {
-      if (mounted) {
+      if (mounted && !_isListening) {
         _navigateToDashboard();
       }
     });
+  }
+
+  Future<void> _startVoiceIntentDetection() async {
+    if (_isListening) return;
+
+    try {
+      if (await _recorder.hasPermission()) {
+        final tempDir = await getTemporaryDirectory();
+        final path = p.join(tempDir.path, 'intent_record.m4a');
+        
+        // 以前のファイルがあれば削除
+        final file = File(path);
+        if (await file.exists()) {
+          await file.delete();
+        }
+
+        setState(() => _isListening = true);
+        
+        // 録音開始 (AAC/m4a)
+        await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: path);
+
+        // 3秒間待機
+        await Future.delayed(const Duration(seconds: 3));
+
+        if (!mounted || !_isListening) return;
+
+        // 録音停止
+        final recordPath = await _recorder.stop();
+        setState(() => _isListening = false);
+
+        if (recordPath != null) {
+          final audioBytes = await File(recordPath).readAsBytes();
+          
+          // Geminiで意図判定
+          final isPositive = await _geminiService.classifyVoiceIntent(audioBytes);
+          
+          if (mounted) {
+            if (isPositive) {
+              debugPrint("Voice Intent: Positive -> Starting Navigation");
+              _startNavigation();
+            } else {
+              debugPrint("Voice Intent: Negative or Neutral -> Returning to Dashboard");
+              _navigateToDashboard();
+            }
+          }
+        } else {
+          // 録音データがない場合はダッシュボードに戻る
+          _navigateToDashboard();
+        }
+      } else {
+        // 権限がない場合は通常通り3秒待って戻る
+        _startAutoExitTimer(const Duration(seconds: 3));
+      }
+    } catch (e) {
+      debugPrint("Error in voice intent detection: $e");
+      if (mounted) {
+        setState(() => _isListening = false);
+        _navigateToDashboard();
+      }
+    }
   }
 
   // Removed _initAutoReturnTracking and _startFaceTracking functionality
@@ -192,6 +269,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
     _autoExitTimer?.cancel();
     _audioPlayer.dispose();
     _infoScrollController.dispose();
+    _recorder.dispose(); // Recorderの破棄
     super.dispose();
   }
 
@@ -205,6 +283,11 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
     _isNavigatingBack = true;
     _autoExitTimer?.cancel();
 
+    if (_isListening) {
+      _recorder.stop();
+      _isListening = false;
+    }
+
     if (mounted) {
       Navigator.of(context).pop(result);
     }
@@ -214,6 +297,11 @@ class _AnalysisScreenState extends State<AnalysisScreen> with TickerProviderStat
     // TTS再生中の場合は停止
     await _audioPlayer.stop();
     _autoExitTimer?.cancel(); // 安全のためここでもキャンセル
+
+    if (_isListening) {
+      _recorder.stop();
+      _isListening = false;
+    }
 
     if (_data.latitude == null || _data.longitude == null) {
       if (mounted) {

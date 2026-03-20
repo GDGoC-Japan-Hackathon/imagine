@@ -473,7 +473,11 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       }
 
       // 音声データの取得 (TTS)
-      final audioBytes = await _geminiService.synthesizeSpeech(result.guideDesc);
+      String ttsText = result.guideDesc;
+      if (result.latitude != null && result.longitude != null) {
+        ttsText += " 。。。 この場所に行きたいですか？";
+      }
+      final audioBytes = await _geminiService.synthesizeSpeech(ttsText);
 
       return AnalysisData(
         tag: "AI RECOGNITION",

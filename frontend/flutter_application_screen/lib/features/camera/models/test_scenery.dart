@@ -17,11 +17,13 @@ class TestScenery {
       targetVector: FaceVector(0, 0), // 画像中央を注視
       label: 'TokyoPlace (Test)',
     ),    
+    /*
     TestScenery(
       assetPath: 'assets/tokyo_place.png',
       targetVector: FaceVector(-15, -15), // 画像中央を注視
       label: 'Car (Test)',
     )
+    */
     // 必要に応じて追加
   ];
 
