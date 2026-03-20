@@ -321,7 +321,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     if (faceWidth < AppConstants.faceWidthMinThreshold) return null;
 
     final eyeCenterX = (eyeLeft['x'] + eyeRight['x']) / 2;
-    final yaw = (nose['x'] - eyeCenterX) / faceWidth * 30.0;
+    final yaw = (eyeCenterX - nose['x']) / faceWidth * 30.0;
 
     final eyeCenterY = (eyeLeft['y'] + eyeRight['y']) / 2;
     final pitch = (nose['y'] - eyeCenterY) / faceWidth * 30.0;
