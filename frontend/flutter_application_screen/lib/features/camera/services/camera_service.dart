@@ -112,7 +112,8 @@ class CameraService {
           // Wait briefly for camera hardware to physically switch on streamer app
           await Future.delayed(const Duration(milliseconds: 1500));
           
-          final jpegBytes = await networkImageStream!.first.timeout(const Duration(seconds: 4));
+          // skip some frames to clear the buffer of front camera images
+          final jpegBytes = await networkImageStream!.take(5).last.timeout(const Duration(seconds: 4));
           final tempDir = await getTemporaryDirectory();
           final file = File('${tempDir.path}/out_network_${DateTime.now().millisecondsSinceEpoch}.jpg');
           await file.writeAsBytes(jpegBytes);

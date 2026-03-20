@@ -96,7 +96,7 @@ class _StreamerScreenState extends State<StreamerScreen> {
 
   /// Dashboard 側から受信したコマンドを処理
   /// 現在対応しているコマンド: switch_camera
-  void _handleCommand(String message) {
+  Future<void> _handleCommand(String message) async {
     try {
       final data = jsonDecode(message);
       if (data['command'] == 'switch_camera') {
@@ -109,7 +109,7 @@ class _StreamerScreenState extends State<StreamerScreen> {
           (c) => c.lensDirection == targetLens,
           orElse: () => _cameras.first,
         );
-        _initCamera(targetCamera);
+        await _initCamera(targetCamera);
       }
     } catch (e) {
       debugPrint("無効なコマンド: $message");
@@ -120,21 +120,34 @@ class _StreamerScreenState extends State<StreamerScreen> {
   Future<void> _initCamera(CameraDescription description) async {
     // 既存のコントローラーを解放
     if (_controller != null) {
-      if (_controller!.value.isStreamingImages) {
-        await _controller!.stopImageStream();
+      final oldController = _controller!;
+      _controller = null; 
+      if (mounted) setState(() {});
+
+      if (oldController.value.isStreamingImages) {
+        try {
+          await oldController.stopImageStream();
+        } catch (e) {
+          debugPrint("Error stopping image stream: $e");
+        }
       }
-      await _controller!.dispose();
+      try {
+        await oldController.dispose();
+      } catch (e) {
+        debugPrint("Error disposing controller: $e");
+      }
     }
 
-    _controller = CameraController(
+    final newController = CameraController(
       description,
       ResolutionPreset.medium,
       enableAudio: false,
       imageFormatGroup: ImageFormatGroup.yuv420,
     );
+    _controller = newController;
 
     try {
-      await _controller!.initialize();
+      await newController.initialize();
       if (mounted) setState(() {});
       _startStreaming();
     } catch (e) {
@@ -205,7 +218,24 @@ class _StreamerScreenState extends State<StreamerScreen> {
         children: [
           // カメラプレビュー
           if (_controller != null && _controller!.value.isInitialized)
-            CameraPreview(_controller!),
+            CameraPreview(_controller!)
+          else
+            Container(
+              color: Colors.black,
+              child: const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: Colors.white24),
+                    SizedBox(height: 16),
+                    Text(
+                      "カメラ切り替え中...",
+                      style: TextStyle(color: Colors.white54, fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
+            ),
 
           SafeArea(
             child: Column(
