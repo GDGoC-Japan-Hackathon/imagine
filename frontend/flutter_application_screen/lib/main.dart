@@ -32,7 +32,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Omni Vision Concierge',
+      title: 'IMAGINE',
       theme: AppTheme.lightTheme,
       home: const DashboardScreen(),
     );

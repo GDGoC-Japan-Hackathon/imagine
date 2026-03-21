@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_application_screen/core/services/ai/gemini_parser.dart';
-import 'package:flutter_application_screen/core/errors/exceptions.dart';
+import 'package:imagine/core/services/ai/gemini_parser.dart';
+import 'package:imagine/core/errors/exceptions.dart';
 
 void main() {
   group('GeminiParser Tests', () {

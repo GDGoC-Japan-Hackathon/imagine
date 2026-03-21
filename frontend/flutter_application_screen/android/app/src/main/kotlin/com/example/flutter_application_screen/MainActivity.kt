@@ -1,4 +1,4 @@
-package com.example.flutter_application_screen
+package com.example.imagine
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
