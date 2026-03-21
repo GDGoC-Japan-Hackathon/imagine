@@ -6,13 +6,13 @@
 
 ```
 [スマートフォン]          [リレーサーバー]         [AAOS 車載端末]
- streamer_app   →  WS   →  relay_server  →  WS  →  flutter_application_screen
+ streamer_app   →  WS   →  relay_server  →  WS  →  imagine
  (このアプリ)             (backend/relay)           (frontend/)
 ```
 
 - **このアプリ (streamer_app)**: スマートフォンのカメラ映像をキャプチャし、WebSocket でリレーサーバーへ送信します。
 - **リレーサーバー**: `backend/relay_server.js` にあります。Google Cloud VM などで常時起動させてください。
-- **Dashboard アプリ**: `frontend/flutter_application_screen` が AAOS 端末で動作します。リレーサーバー経由でこのアプリの映像を受信し、顔検出・AI 解析を行います。
+- **Dashboard アプリ**: `frontend/imagine` が AAOS 端末で動作します。リレーサーバー経由でこのアプリの映像を受信し、顔検出・AI 解析を行います。
 
 ## セットアップ
 
