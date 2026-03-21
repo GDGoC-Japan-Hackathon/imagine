@@ -160,13 +160,14 @@ class LocalCameraService implements BaseCameraService {
       selectedOutCamera,
       ResolutionPreset.high,
       enableAudio: false,
-      imageFormatGroup: ImageFormatGroup.yuv420,
+      imageFormatGroup: ImageFormatGroup.jpeg, // 色崩れ（緑化）を防ぐためJPEGを明示
     );
 
     try {
       await backCameraController!.initialize();
+      // カメラの露出(AE)およびホワイトバランス(AWB)が安定するのを待ってから撮影し、白飛びを防ぐ
+      await Future.delayed(const Duration(milliseconds: 800));
       final image = await backCameraController!.takePicture();
-      await Future.delayed(AppConstants.cameraCaptureDelay);
       return image;
     } catch (e) {
       throw CameraException("写真の撮影中にエラーが発生しました: $e");
