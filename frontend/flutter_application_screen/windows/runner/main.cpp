@@ -27,7 +27,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
+<<<<<<< HEAD
   if (!window.Create(L"imagine", origin, size)) {
+=======
+  if (!window.Create(L"flutter_application_screen", origin, size)) {
+>>>>>>> parent of 8eab70d ([Change] プロジェクト名を更新)
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

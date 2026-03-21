@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 # imagine
+=======
+# flutter_application_screen
+>>>>>>> parent of 8eab70d ([Change] プロジェクト名を更新)
 
 A new Flutter project.
 

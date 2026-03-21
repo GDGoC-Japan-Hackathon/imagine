@@ -1,16 +1,16 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:imagine/core/services/ai/gemini_parser.dart';
-import 'package:imagine/core/errors/exceptions.dart';
+import 'package:flutter_application_screen/core/services/ai/gemini_parser.dart';
+import 'package:flutter_application_screen/core/errors/exceptions.dart';
 
 void main() {
   group('GeminiParser Tests', () {
     test('parseAnalysisResponse should correctly parse valid JSON', () {
-      const jsonText = '```json\n{\n  "名前": "東京タワー",\n  "解説": "日本のシンボルです、E,\n  "polygon": [100, 200, 300, 400],\n  "latitude": 35.6586,\n  "longitude": 139.7454\n}\n```';
+      const jsonText = '```json\n{\n  "名前": "東京タワー",\n  "解説": "日本のシンボルです。",\n  "polygon": [100, 200, 300, 400],\n  "latitude": 35.6586,\n  "longitude": 139.7454\n}\n```';
       
       final result = GeminiParser.parseAnalysisResponse(jsonText);
       
       expect(result.targetName, '東京タワー');
-      expect(result.guideDesc, '日本のシンボルです、E);
+      expect(result.guideDesc, '日本のシンボルです。');
       expect(result.segData[0]['polygon'], [100, 200, 300, 400]);
       expect(result.latitude, 35.6586);
       expect(result.longitude, 139.7454);

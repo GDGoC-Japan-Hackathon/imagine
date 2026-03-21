@@ -15,7 +15,7 @@ if (localPropertiesFile.exists()) {
 val googleMapsApiKey: String = localProperties.getProperty("google.maps.api.key") ?: ""
 
 android {
-    namespace = "com.example.imagine"
+    namespace = "com.example.flutter_application_screen"
     compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
@@ -31,7 +31,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.imagine"
+        applicationId = "com.example.flutter_application_screen"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion // Required for Google Navigation SDK
