@@ -36,47 +36,58 @@ class NavigationHandler {
     }
   }
 
+  static bool _isNavigating = false;
+
   static Future<void> startNavigation({
     required BuildContext context,
     required AnalysisData data,
     required VoidCallback onStarted,
   }) async {
-    onStarted();
-
-    if (data.latitude == null || data.longitude == null) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('ナビゲーション用の座標が取得できていません。')),
-        );
-      }
+    if (_isNavigating) {
+      debugPrint("Navigation already starting. Ignoring concurrent request.");
       return;
     }
+    _isNavigating = true;
 
     final encodedTitle = Uri.encodeComponent(data.title);
     final intentUrl = 'geo:${data.latitude},${data.longitude}?q=$encodedTitle';
     final googleNavUrl = 'google.navigation:q=$encodedTitle';
     final httpsUrl = 'https://www.google.com/maps/search/?api=1&query=$encodedTitle';
-    
-    // GMS が利用不可の場合は、SDK ルートを完全にスキップして Intent にフォールバック
-    final gmsAvailable = await _isGmsAvailable();
-    if (!gmsAvailable) {
-      debugPrint("GMS not available. Skipping Navigation SDK, falling back to Intent.");
-      if (context.mounted) {
-        await _launchIntent(context, intentUrl, googleNavUrl, httpsUrl);
-      }
-      return;
-    }
 
-    // GMS が利用可能な場合は、位置情報サービスと権限を確認
     try {
-      // 1. 位置情報が取得可能か（ハードウェア/プロバイダー）をネィティブ側で詳細チェック
-      final canGetLocation = await _canGetLocation();
-      if (!canGetLocation) {
-        debugPrint("Location cannot be obtained (No Providers). Falling back to Intent.");
+      onStarted();
+
+      if (data.latitude == null || data.longitude == null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('ナビゲーション用の座標が取得できていません。')),
+          );
+        }
+        return;
+      }
+      
+      // GMS が利用不可の場合は、SDK ルートを完全にスキップして Intent にフォールバック
+      final gmsAvailable = await _isGmsAvailable();
+      if (!gmsAvailable) {
+        debugPrint("GMS not available. Skipping Navigation SDK, falling back to Intent.");
         if (context.mounted) {
           await _launchIntent(context, intentUrl, googleNavUrl, httpsUrl);
         }
         return;
+      }
+
+      // GMS が利用可能な場合は、位置情報サービスと権限を確認
+      // 1. まず権限チェック（Android 12+では権限がないとGPS有効判定機能が正常動作しないことがあるため）
+      var status = await Permission.location.status;
+      if (!status.isGranted) {
+        status = await Permission.location.request();
+        if (!status.isGranted) {
+          debugPrint("Location permission denied. Falling back to Intent.");
+          if (context.mounted) {
+            await _launchIntent(context, intentUrl, googleNavUrl, httpsUrl);
+          }
+          return;
+        }
       }
 
       // 2. 位置情報サービス（GPS）自体が有効かチェック
@@ -89,17 +100,14 @@ class NavigationHandler {
         return;
       }
 
-      // 3. 権限チェック
-      var status = await Permission.location.status;
-      if (!status.isGranted) {
-        status = await Permission.location.request();
-        if (!status.isGranted) {
-          debugPrint("Location permission denied. Falling back to Intent.");
-          if (context.mounted) {
-            await _launchIntent(context, intentUrl, googleNavUrl, httpsUrl);
-          }
-          return;
+      // 3. 位置情報が取得可能か（ハードウェア/プロバイダー）をネィティブ側で詳細チェック
+      final canGetLocation = await _canGetLocation();
+      if (!canGetLocation) {
+        debugPrint("Location cannot be obtained (No Providers). Falling back to Intent.");
+        if (context.mounted) {
+          await _launchIntent(context, intentUrl, googleNavUrl, httpsUrl);
         }
+        return;
       }
 
       if (!await GoogleMapsNavigator.areTermsAccepted()) {
@@ -130,6 +138,8 @@ class NavigationHandler {
         displayOptions: NavigationDisplayOptions(),
       );
 
+      bool isViewCreated = false;
+
       if (context.mounted) {
         // ナビゲーション画面を表示（SDKモード）
         await Navigator.of(context).push(
@@ -138,6 +148,9 @@ class NavigationHandler {
               appBar: AppBar(title: Text('${data.title} への案内')),
               body: GoogleMapsNavigationView(
                 onViewCreated: (controller) async {
+                  if (isViewCreated) return;
+                  isViewCreated = true;
+                  
                   final navigator = Navigator.of(context);
                   try {
                     final status = await GoogleMapsNavigator.setDestinations(destinations).timeout(
@@ -170,10 +183,12 @@ class NavigationHandler {
             ),
           ),
         );
-        
-        // ナビゲーション画面が閉じられた後、画面が生きていればポップする
-        if (context.mounted) {
-          Navigator.of(context).pop();
+        // ナビゲーション画面が閉じられた（戻るキー等でポップされた）後、ガイダンスを終了する
+        try {
+          await GoogleMapsNavigator.stopGuidance();
+          // clearDestinations() は 400 Bad Request エラーの原因になるため呼び出さない
+        } catch (e) {
+          debugPrint("Failed to stop guidance: $e");
         }
       }
     } catch (e) {
@@ -181,6 +196,8 @@ class NavigationHandler {
       if (context.mounted) {
         await _launchIntent(context, intentUrl, googleNavUrl, httpsUrl);
       }
+    } finally {
+      _isNavigating = false;
     }
   }
 
