@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_application_screen/core/services/vision/face_tracker_service.dart';
-import 'package:flutter_application_screen/core/models/face_vector.dart';
-import 'package:flutter_application_screen/core/constants/app_constants.dart';
+import 'package:imagine/core/services/vision/face_tracker_service.dart';
+import 'package:imagine/core/models/face_vector.dart';
+import 'package:imagine/core/constants/app_constants.dart';
 
 void main() {
   group('FaceTrackerService Tests', () {
