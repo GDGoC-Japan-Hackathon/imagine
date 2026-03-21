@@ -192,18 +192,28 @@ class AnalysisStaticImage extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        // 対象物が画面の約75%を占めるようにズーム率を計算（大きすぎ・小さすぎを防ぐため 1.0〜4.0 倍に制限）
-        final zoomScale = (0.75 / math.max(0.1, math.max(w, h))).clamp(1.0, 4.0);
-        final alignment = FractionalOffset(cx, cy);
+        final viewW = constraints.maxWidth;
+        final viewH = constraints.maxHeight;
+
+        // 対象物が画面の約70%を占めるようにズーム率を計算（1.0〜4.0 倍に制限）
+        final zoomScale = (0.70 / math.max(0.1, math.max(w, h))).clamp(1.0, 4.0);
+
+        // 対象物の中心を表示領域の中心に移動するためのオフセットを計算
+        // cx, cy は画像全体に対する対象物中心の割合（0.0〜1.0）
+        // 画像が BoxFit.cover で表示されるため、表示領域サイズ基準で計算
+        final offsetX = (0.5 - cx) * viewW * zoomScale;
+        final offsetY = (0.5 - cy) * viewH * zoomScale;
 
         return ClipRect(
-          child: Transform.scale(
-            scale: zoomScale,
-            alignment: alignment,
-            child: Image(
-              image: imageProvider,
-              fit: BoxFit.cover,
-              alignment: alignment,
+          child: Transform.translate(
+            offset: Offset(offsetX, offsetY),
+            child: Transform.scale(
+              scale: zoomScale,
+              alignment: Alignment.center,
+              child: Image(
+                image: imageProvider,
+                fit: BoxFit.cover,
+              ),
             ),
           ),
         );

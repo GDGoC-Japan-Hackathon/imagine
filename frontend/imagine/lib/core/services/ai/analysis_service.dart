@@ -64,7 +64,7 @@ $locationDesc
     "latitude": 緯度 (数値 or null),
     "longitude": 経度 (数値 or null)
 }
-※ polygon は 0-1000 の正規化座標。
+※ polygon は対象物を囲むバウンディングボックスの 0-1000 の正規化座標です。必ず [ymin, xmin, ymax, xmax] の順番で4つの数値を含む配列にしてください。
 ''';
   }
 }
