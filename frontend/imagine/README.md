@@ -36,7 +36,7 @@ GOOGLE_SERVICE_ACCOUNT_JSON='{"type":"service_account", "project_id":"...", "pri
 
 # デバッグ用設定
 SKIP_FACE_DETECTION=false
-DEBUG_MODE=true
+DEBUG_MODE=false
 DEBUG_SHOW_CAMERA=false
 DEBUG_SHOW_FACE_IMAGE=false
 
